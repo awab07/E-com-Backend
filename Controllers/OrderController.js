@@ -8,19 +8,13 @@ export const OrderCreator = async (req, res) => {
         const userID = req.user ? req.user.id : null;
         let user = null;
         if (userID) {
-            user = await User.findById(userID);
+            user = await User.findById(userID).lean();
         }
-        const {
-            items,
-            shippingAddress,
-            paymentMethod,
-            guestInfo
-        } = req.body;
+
+        const { items, shippingAddress, paymentMethod, guestInfo } = req.body;
+
         if (!Array.isArray(items) || items.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "Items are required!"
-            });
+            return res.status(400).json({ success: false, message: "Items are required!" });
         }
         if (
             !shippingAddress?.street ||
@@ -29,51 +23,43 @@ export const OrderCreator = async (req, res) => {
             !shippingAddress?.postalCode ||
             !shippingAddress?.country
         ) {
-            return res.status(400).json({
-                success: false,
-                message: "Please provide a complete shipping address!"
-            });
+            return res.status(400).json({ success: false, message: "Please provide a complete shipping address!" });
         }
         if (!user) {
-            if (
-                !guestInfo?.firstName ||
-                !guestInfo?.lastName ||
-                !guestInfo?.email ||
-                !guestInfo?.phone
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Guest information is required."
-                });
+            if (!guestInfo?.firstName || !guestInfo?.lastName || !guestInfo?.email || !guestInfo?.phone) {
+                return res.status(400).json({ success: false, message: "Guest information is required." });
             }
         }
+
+        // Validate item structure first
+        for (const item of items) {
+            if (!item.productId || !item.quantity || item.quantity <= 0) {
+                return res.status(400).json({ success: false, message: "Invalid item structure" });
+            }
+        }
+
+        // FIX: Batch-fetch all products in ONE query instead of N separate queries
+        const productIds = items.map(i => i.productId);
+        const products = await Product.find({ _id: { $in: productIds } });
+        const productMap = {};
+        for (const p of products) {
+            productMap[p._id.toString()] = p;
+        }
+
+        // Validate stock and build processed items
         let processedItems = [];
         let totalAmount = 0;
         let totalItems = 0;
-        const deliverytime = new Date()
+
         for (const item of items) {
-            if (!item.productId || !item.quantity || item.quantity <= 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid item structure"
-                });
-            }
-            const product = await Product.findById(item.productId);
+            const product = productMap[item.productId.toString()];
             if (!product) {
-                return res.status(404).json({
-                    success: false,
-                    message: `Product not found: ${item.productId}`
-                });
+                return res.status(404).json({ success: false, message: `Product not found: ${item.productId}` });
             }
-            if (
-                product.stock !== undefined &&
-                product.stock < item.quantity
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    message: `Insufficient stock for ${product.name}`
-                });
+            if (product.stock !== undefined && product.stock < item.quantity) {
+                return res.status(400).json({ success: false, message: `Insufficient stock for ${product.name}` });
             }
+
             let finalPrice = product.price;
             const now = new Date();
             if (
@@ -83,15 +69,12 @@ export const OrderCreator = async (req, res) => {
                 now <= new Date(product.discount.endDate)
             ) {
                 if (product.discount.discountType === "percentage") {
-                    finalPrice =
-                        product.price -
-                        (product.price * product.discount.value) / 100;
+                    finalPrice = product.price - (product.price * product.discount.value) / 100;
                 } else if (product.discount.discountType === "fixed") {
-                    finalPrice =
-                        product.price - product.discount.value;
+                    finalPrice = product.price - product.discount.value;
                 }
             }
-            deliverytime.setDate(deliverytime.getDate() + 4)
+
             processedItems.push({
                 product: product._id,
                 quantity: item.quantity,
@@ -99,9 +82,21 @@ export const OrderCreator = async (req, res) => {
             });
             totalAmount += finalPrice * item.quantity;
             totalItems += item.quantity;
-            product.stock -= item.quantity;
-            await product.save();
         }
+
+        // FIX: Estimated delivery is per-order, not per-item — moved outside loop
+        const deliverytime = new Date();
+        deliverytime.setDate(deliverytime.getDate() + 4);
+
+        // FIX: Batch-update all product stocks in a single bulkWrite call
+        const bulkOps = items.map(item => ({
+            updateOne: {
+                filter: { _id: item.productId },
+                update: { $inc: { stock: -item.quantity } }
+            }
+        }));
+        await Product.bulkWrite(bulkOps);
+
         const orderData = {
             items: processedItems,
             totalAmount,
@@ -111,6 +106,7 @@ export const OrderCreator = async (req, res) => {
             isGuestOrder: !user,
             estimatedDelivery: deliverytime
         };
+
         if (user) {
             orderData.user = user._id;
         } else {
@@ -121,24 +117,26 @@ export const OrderCreator = async (req, res) => {
                 phone: guestInfo.phone
             };
         }
+
         const order = await Order.create(orderData);
+
+        // Update user address if logged in
         if (user) {
-            user.address = shippingAddress;
-            await user.save();
+            await User.findByIdAndUpdate(user._id, { address: shippingAddress });
         }
+
         await order.populate("items.product");
+
         return res.status(201).json({
             success: true,
             message: userID ? "Order Created Successfully!" : "Guest Order Created Successfully!",
             order
         });
     } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
+
 export const getOrders = async (req, res) => {
     try {
         const userID = req.user.id;
@@ -147,7 +145,12 @@ export const getOrders = async (req, res) => {
         const skip = (page - 1) * limit;
 
         const [my_orders, totalItems] = await Promise.all([
-            Order.find({ user: userID }).populate("items.product").skip(skip).limit(limit).sort({ createdAt: -1 }),
+            Order.find({ user: userID })
+                .populate("items.product")
+                .skip(skip)
+                .limit(limit)
+                .sort({ createdAt: -1 })
+                .lean(),
             Order.countDocuments({ user: userID })
         ]);
 
@@ -163,32 +166,33 @@ export const getOrders = async (req, res) => {
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
-}
+};
+
 export const getOrderById = async (req, res) => {
     try {
-        const userID = req.user.id;
         const { id } = req.params;
-        const order = await Order.findById(id).populate("items.product")
-        if (!order) return res.status(404).json({ success: false, message: "Order Not Found!" })
-        return res.status(200).json({ success: true, message: "Order Fetched Successfully!", order })
+        const order = await Order.findById(id).populate("items.product").lean();
+        if (!order) return res.status(404).json({ success: false, message: "Order Not Found!" });
+        return res.status(200).json({ success: true, message: "Order Fetched Successfully!", order });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message })
+        return res.status(500).json({ success: false, message: error.message });
     }
-}
+};
+
 export const getAllOrderForAdmin = async (req, res) => {
     try {
-        const page  = parseInt(req.query.page)   || 1;
-        const limit = parseInt(req.query.limit)  || 10;
+        const page  = parseInt(req.query.page)  || 1;
+        const limit = parseInt(req.query.limit) || 10;
         const skip  = (page - 1) * limit;
 
         const [orders, totalItems] = await Promise.all([
             Order.find({ isArchived: false })
-                .populate("items.product", "name price image category") 
-                .populate("user", "firstname lastname email phno")      
+                .populate("items.product", "name price image category")
+                .populate("user", "firstname lastname email phno")
                 .skip(skip)
                 .limit(limit)
                 .sort({ createdAt: -1 })
-                .lean(),        
+                .lean(),
             Order.countDocuments({ isArchived: false })
         ]);
 
@@ -204,138 +208,159 @@ export const getAllOrderForAdmin = async (req, res) => {
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
-}
+};
+
 export const UpdateOrderStatus = async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;
-        const validStatuses = [
-            "pending",
-            "confirmed",
-            "shipped",
-            "delivered",
-            "cancelled"
-        ];
+        const validStatuses = ["pending", "confirmed", "shipped", "delivered", "cancelled"];
         const allowedTransitions = {
             pending: ["confirmed", "cancelled"],
             confirmed: ["shipped"],
             shipped: ["delivered"],
             delivered: [],
             cancelled: []
-        }
+        };
+
         const order = await Order.findById(id);
-        if (!order) return res.status(404).json({ success: false, message: "Order Not Found!" })
-        if (!validStatuses.includes(status)) return res.status(400).json({ success: false, message: "Invalid Status!" })
-        if (!allowedTransitions[order.status].includes(status)) return res.status(400).json({ success: false, message: `Can't change the status ${order.status} to ${status}` })
-        if (status === "cancelled" && order.status !== "cancelled") {
-            for (const item of order.items) {
-                const product = await Product.findById(item.product);
-                if (product) {
-                    product.stock += item.quantity;
-                    await product.save();
-                }
-            }
+        if (!order) return res.status(404).json({ success: false, message: "Order Not Found!" });
+        if (!validStatuses.includes(status)) return res.status(400).json({ success: false, message: "Invalid Status!" });
+        if (!allowedTransitions[order.status].includes(status)) {
+            return res.status(400).json({ success: false, message: `Can't change the status ${order.status} to ${status}` });
         }
+
+        // FIX: Batch stock restoration on cancellation using bulkWrite
+        if (status === "cancelled" && order.status !== "cancelled") {
+            const bulkOps = order.items.map(item => ({
+                updateOne: {
+                    filter: { _id: item.product },
+                    update: { $inc: { stock: item.quantity } }
+                }
+            }));
+            if (bulkOps.length > 0) await Product.bulkWrite(bulkOps);
+        }
+
         if (status === "delivered" && order.status !== "delivered") {
-
-            let stats = await StoreStats.findOne();
-
-            if (!stats) {
-                stats = await StoreStats.create({
-                    totalRevenue: 0,
-                    totalOrders: 0,
-                    deliveredOrders: 0
-                });
-            }
-
-            stats.totalRevenue += order.totalAmount;
-            stats.deliveredOrders += 1;
-
-            await stats.save();
+            // FIX: Use findOneAndUpdate with $inc to avoid race condition on stats
+            await StoreStats.findOneAndUpdate(
+                {},
+                {
+                    $inc: {
+                        totalRevenue: order.totalAmount,
+                        deliveredOrders: 1
+                    }
+                },
+                { upsert: true, new: true }
+            );
             order.deliveredAt = new Date();
         }
+
         order.status = status;
-        await order.save()
-        return res.status(200).json({ success: true, message: "Order Status Updated Successfully!", order })
+        await order.save();
+        return res.status(200).json({ success: true, message: "Order Status Updated Successfully!", order });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message })
+        return res.status(500).json({ success: false, message: error.message });
     }
-}
+};
+
 export const ordercancelforuser = async (req, res) => {
     try {
         const userID = req.user.id;
         const { id } = req.params;
         const order = await Order.findById(id);
-        if (!order) return res.status(404).json({ success: false, message: "Order Not Found!" })
-        if (order.user.toString() !== userID) return res.status(401).json({ success: false, message: "You are not authorized for this Action!" })
-        if (order.status === "delivered") return res.status(400).json({ success: false, message: "You can't cancel a delivered order!" })
-        if (order.status === "shipped") return res.status(400).json({ success: false, message: "You can't cancel a shipped order!" })
-        if (order.status === "cancelled") return res.status(400).json({ success: false, message: "You can't cancel a cancelled order!" })
-        for (const item of order.items) {
-            const product = await Product.findById(item.product);
-            if (product) {
-                product.stock += item.quantity;
-                await product.save();
+        if (!order) return res.status(404).json({ success: false, message: "Order Not Found!" });
+        if (order.user.toString() !== userID) return res.status(403).json({ success: false, message: "You are not authorized for this Action!" });
+        if (order.status === "delivered") return res.status(400).json({ success: false, message: "You can't cancel a delivered order!" });
+        if (order.status === "shipped") return res.status(400).json({ success: false, message: "You can't cancel a shipped order!" });
+        if (order.status === "cancelled") return res.status(400).json({ success: false, message: "You can't cancel a cancelled order!" });
+
+        // FIX: Batch stock restoration using bulkWrite
+        const bulkOps = order.items.map(item => ({
+            updateOne: {
+                filter: { _id: item.product },
+                update: { $inc: { stock: item.quantity } }
             }
-        }
+        }));
+        if (bulkOps.length > 0) await Product.bulkWrite(bulkOps);
+
         order.status = "cancelled";
-        await order.save()
-        return res.status(200).json({ success: true, message: "Order Cancelled Successfully!", order })
+        await order.save();
+        return res.status(200).json({ success: true, message: "Order Cancelled Successfully!", order });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message })
+        return res.status(500).json({ success: false, message: error.message });
     }
-}
+};
+
 export const orderdeletionforAdmin = async (req, res) => {
     try {
         const { id } = req.params;
-        const order = await Order.findById(id);
-        if (!order) return res.status(404).json({ success: false, message: "Order Not Found!" })
-        order.isArchived = true;
-        await order.save();
-        return res.status(200).json({ success: true, message: "Order Deleted Successfully!", order })
+        const order = await Order.findByIdAndUpdate(id, { isArchived: true }, { new: true });
+        if (!order) return res.status(404).json({ success: false, message: "Order Not Found!" });
+        return res.status(200).json({ success: true, message: "Order Deleted Successfully!", order });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message })
+        return res.status(500).json({ success: false, message: error.message });
     }
-}
+};
+
 export const getArchiedOrders = async (req, res) => {
     try {
-        const Archived = await Order.find({ isArchived: true })
-        return res.status(200).json({ success: true, message: "Archied Orders Successfully!", Archived })
+        // FIX: Added pagination — archived orders can grow unboundedly
+        const page  = parseInt(req.query.page)  || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip  = (page - 1) * limit;
+
+        const [Archived, totalItems] = await Promise.all([
+            Order.find({ isArchived: true })
+                .populate("items.product", "name price")
+                .populate("user", "firstname lastname email")
+                .skip(skip)
+                .limit(limit)
+                .sort({ createdAt: -1 })
+                .lean(),
+            Order.countDocuments({ isArchived: true })
+        ]);
+
+        return res.status(200).json({
+            success:      true,
+            message:      "Archived Orders Fetched Successfully!",
+            currentPage:  page,
+            totalPages:   Math.ceil(totalItems / limit),
+            totalItems,
+            itemsPerPage: limit,
+            Archived
+        });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message })
+        return res.status(500).json({ success: false, message: error.message });
     }
-}
+};
+
 export const getStatsStore = async (req, res) => {
     try {
-        const StoreStates = await StoreStats.findOne()
-        console.log(StoreStates)
-        const monthlyRevenue = await Order.aggregate([
-            {
-                $match: {
-                    status: "delivered",
-                    deliveredAt: { $ne: null }
-                }
-            },
-            {
-                $group: {
-                    _id: {
-                        year: { $year: "$deliveredAt" },
-                        month: { $month: "$deliveredAt" }
-                    },
-                    revenue: { $sum: "$totalAmount" }
-                }
-            },
-            {
-                $sort: {
-                    "_id.year": 1,
-                    "_id.month": 1
-                }
-            }
+        const [StoreStates, monthlyRevenue, totalOrders] = await Promise.all([
+            StoreStats.findOne().lean(),
+            Order.aggregate([
+                { $match: { status: "delivered", deliveredAt: { $ne: null } } },
+                {
+                    $group: {
+                        _id: { year: { $year: "$deliveredAt" }, month: { $month: "$deliveredAt" } },
+                        revenue: { $sum: "$totalAmount" }
+                    }
+                },
+                { $sort: { "_id.year": 1, "_id.month": 1 } }
+            ]),
+            // FIX: totalOrders was never populated — compute it live
+            Order.countDocuments({})
         ]);
-        console.log(monthlyRevenue)
-        if (!StoreStates) return res.status(404).json({ success: false, message: "No States Found!" })
-        return res.status(200).json({ success: true, StoreStates, monthlyRevenue })
+
+        if (!StoreStates) return res.status(404).json({ success: false, message: "No Stats Found!" });
+
+        return res.status(200).json({
+            success: true,
+            StoreStates: { ...StoreStates, totalOrders },
+            monthlyRevenue
+        });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message })
+        return res.status(500).json({ success: false, message: error.message });
     }
-}
+};

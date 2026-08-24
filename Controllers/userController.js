@@ -5,38 +5,61 @@ import { OTP_gen } from "../utils/OTP_Generator.js";
 import { sendOTPEmail } from "../Mailer/MailSender.js";
 import { generateAccessToken, generateRefreshToken } from "../utils/Tokenization.js";
 
+const safeUserFields = "_id firstname lastname email phno address role isverified isActive createdAt";
+
 export const registerUser = async (req, res) => {
     try {
         const { firstname, lastname, email, password, phno } = req.body;
 
-        const [userExists, phoneExists] = await Promise.all([
-            User.findOne({ email }),
-            User.findOne({ phno })
-        ]);
-
-        if (phoneExists) return res.status(400).json({ message: "User with that Phone Number Already in Database!" });
+        
+        if (!firstname || !email || !password || !phno) {
+            return res.status(400).json({ message: "Please fill all required fields!" });
+        }
         if (!firstname.match(/^[a-zA-Z\s]+$/)) return res.status(400).json({ message: "Invalid Firstname!" });
         if (lastname && !lastname.match(/^[a-zA-Z\s]+$/)) return res.status(400).json({ message: "Invalid Lastname!" });
         if (!phno.match(/^\+?\d{10,15}$/)) return res.status(400).json({ message: "Invalid Phone Number!" });
         if (password.length < 6) return res.status(400).json({ message: "Password must be 6 characters long!" });
         if (!password.match(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/))
             return res.status(400).json({ message: "Password must contain at least one uppercase letter, one lowercase letter, one number and one special character!" });
-        if (!email.endsWith("@gmail.com")) return res.status(400).json({ message: "Invalid Email" });
+        if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return res.status(400).json({ message: "Invalid Email!" });
+
+        const [userExists, phoneExists] = await Promise.all([
+            User.findOne({ email }).lean(),
+            User.findOne({ phno }).lean()
+        ]);
+        if (phoneExists) return res.status(400).json({ message: "User with that Phone Number Already in Database!" });
         if (userExists) return res.status(400).json({ message: "User Already in Database!" });
 
         const HashedPassword = await bcrypt.hash(password, 10);
-        const user = await User.create({ email, firstname, lastname, password: HashedPassword, phno });
 
+        
         const otp = OTP_gen();
-        user.otp = otp;
-        user.otp_expiry = Date.now() + 5 * 60 * 1000;
+        const hashedOtp = await bcrypt.hash(otp, 10);
 
-        await Promise.all([
-            user.save(),
-            sendOTPEmail(email, otp)
-        ]);
+        const user = await User.create({
+            email,
+            firstname,
+            lastname,
+            password: HashedPassword,
+            phno,
+            otp: hashedOtp,
+            otp_expiry: Date.now() + 5 * 60 * 1000
+        });
 
-        return res.status(200).json({ success: true, user, message: "User Registered Successfully!" });
+        await sendOTPEmail(email, otp);
+
+        
+        return res.status(201).json({
+            success: true,
+            message: "User Registered Successfully! Please check your email for OTP verification.",
+            user: {
+                _id: user._id,
+                firstname: user.firstname,
+                lastname: user.lastname,
+                email: user.email,
+                phno: user.phno
+            }
+        });
     } catch (error) {
         return res.status(500).json({ message: error.message });
     }
@@ -68,7 +91,23 @@ export const Loginuser = async (req, res) => {
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 
-        return res.status(200).json({ success: true, message: "User Logged in Successfully!", accessToken, user });
+        
+        return res.status(200).json({
+            success: true,
+            message: "User Logged in Successfully!",
+            accessToken,
+            user: {
+                _id: user._id,
+                firstname: user.firstname,
+                lastname: user.lastname,
+                email: user.email,
+                phno: user.phno,
+                address: user.address,
+                role: user.role,
+                isverified: user.isverified,
+                isActive: user.isActive
+            }
+        });
     } catch (error) {
         return res.status(500).json({ message: error.message });
     }
@@ -115,7 +154,6 @@ export const logout = async (req, res) => {
     try {
         const token = req.cookies?.refreshToken;
         if (token) {
-
             await User.findOneAndUpdate(
                 { refreshToken: token },
                 { refreshToken: null, refreshTokenExpiry: null }
@@ -161,7 +199,15 @@ export const UpdateUser = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "Profile Updated Successfully!",
-            user: { _id: user._id, firstname: user.firstname, lastname: user.lastname, email: user.email, phno: user.phno, address: user.address, role: user.role },
+            user: {
+                _id: user._id,
+                firstname: user.firstname,
+                lastname: user.lastname,
+                email: user.email,
+                phno: user.phno,
+                address: user.address,
+                role: user.role
+            },
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -170,7 +216,8 @@ export const UpdateUser = async (req, res) => {
 
 export const getuserbyid = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
+        
+        const user = await User.findById(req.user.id).select(safeUserFields).lean();
         if (!user) return res.status(404).json({ success: false, message: "User Not Found!" });
         return res.status(200).json({ success: true, message: "User Fetched Successfully!", user });
     } catch (error) {
@@ -183,14 +230,17 @@ export const verifyOTP = async (req, res) => {
         const { email, otp } = req.body;
         const existingmail = await User.findOne({ email });
         if (!existingmail) return res.status(404).json({ success: false, message: "User Not Found Please Register first then verify!" });
-        if (!otp) return res.status(404).json({ success: false, message: "Please Enter your OTP For verification" });
-        if (!existingmail.otp) return res.status(404).json({ success: false, message: "OTP Not Found" });
+        if (!otp) return res.status(400).json({ success: false, message: "Please Enter your OTP For verification" });
+        if (!existingmail.otp) return res.status(400).json({ success: false, message: "OTP Not Found" });
         if (existingmail.otp_expiry < Date.now()) return res.status(400).json({ success: false, message: "OTP Expired!" });
-        if (existingmail.otp !== otp) return res.status(400).json({ success: false, message: "Invalid OTP" });
+
+        // FIX: Compare against hashed OTP
+        const isOtpValid = await bcrypt.compare(otp, existingmail.otp);
+        if (!isOtpValid) return res.status(400).json({ success: false, message: "Invalid OTP" });
 
         await User.findOneAndUpdate(
             { email },
-            { isverified: true, otp: null, otp_expiry: null }
+            { isverified: true, isActive: true, otp: null, otp_expiry: null }
         );
 
         return res.status(200).json({ success: true, message: "User Verified Successfully!" });
@@ -209,7 +259,9 @@ export const reverify = async (req, res) => {
         if (existed_user.isverified) return res.status(400).json({ success: false, message: "User is already verified." });
 
         const otp = OTP_gen();
-        existed_user.otp = otp;
+        // FIX: Hash OTP before storing
+        const hashedOtp = await bcrypt.hash(otp, 10);
+        existed_user.otp = hashedOtp;
         existed_user.otp_expiry = Date.now() + 5 * 60 * 1000;
 
         await Promise.all([
@@ -232,7 +284,7 @@ export const changeUserStatus = async (req, res) => {
         const user = await User.findByIdAndUpdate(
             id,
             { isActive: status },
-            { new: true }
+            { new: true, select: safeUserFields }
         );
         if (!user) return res.status(404).json({ success: false, message: "User Not Found in the Database!" });
 
@@ -259,7 +311,13 @@ export const getalluserforadmin = async (req, res) => {
         }
 
         const [users, totalItems] = await Promise.all([
-            User.find(filter).skip(skip).limit(limit).sort({ createdAt: -1 }),
+            
+            User.find(filter)
+                .select(safeUserFields)
+                .skip(skip)
+                .limit(limit)
+                .sort({ createdAt: -1 })
+                .lean(),
             User.countDocuments(filter)
         ]);
 
