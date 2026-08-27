@@ -43,9 +43,11 @@ const productRoutes = express.Router()
  *               category:
  *                 type: string
  *                 example: mobile
- *               image:
- *                 type: string
- *                 format: binary
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
  *     responses:
  *       201:
  *         description: Product created successfully
@@ -103,9 +105,11 @@ productRoutes.get("/allproducts", getAllProducts)
  *                 type: number
  *               category:
  *                 type: string
- *               image:
- *                 type: string
- *                 format: binary
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
  *     responses:
  *       200:
  *         description: Product updated successfully
