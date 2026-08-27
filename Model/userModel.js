@@ -72,8 +72,7 @@ const userSchema = new mongoose.Schema({
 
 }, { timestamps: true })
 
-userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ phno: 1 }, { unique: true });
+
 userSchema.index({ createdAt: -1 });
 userSchema.index({ refreshToken: 1 });
 
