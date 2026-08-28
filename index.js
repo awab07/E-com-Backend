@@ -31,6 +31,20 @@ app.use(cors({
 }))
 
 app.use(express.json())
+
+app.use((req, res, next) => {
+    const start = performance.now();
+
+    res.on("finish", () => {
+        console.log(
+            "ACTUAL APP REQUEST TIME:",
+            (performance.now() - start).toFixed(2),
+            "ms"
+        );
+    });
+
+    next();
+});
 app.use(cookieParser());
 app.use(logger)
 
