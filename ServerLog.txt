@@ -10300,3 +10300,10 @@
 2026-08-28T13:27:00.616Z | GET | /api-docs/spec
 2026-08-28T13:27:00.651Z | GET | /favicon.ico
 2026-08-28T13:27:37.390Z | GET | /Product/allproducts?page=1&limit=10
+2026-08-28T14:41:43.467Z | GET | /Product/allproducts?page=1&limit=10
+2026-08-28T14:45:53.596Z | GET | /Product/allproducts?page=1&limit=10
+2026-08-28T14:54:01.404Z | GET | /Product/allproducts?page=1&limit=10
+2026-08-28T14:55:04.017Z | GET | /Product/allproducts?page=1&limit=10
+2026-08-28T14:55:13.389Z | GET | /api-docs
+2026-08-28T14:55:14.260Z | GET | /api-docs/spec
+2026-08-28T14:56:00.884Z | GET | /Product/allproducts?page=1&limit=10
