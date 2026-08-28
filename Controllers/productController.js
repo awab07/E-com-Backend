@@ -113,7 +113,7 @@ export const getAllProducts = async (req, res) => {
         const skip = (page - 1) * limit;
         const dbStart = performance.now();
         const [products, totalItems] = await Promise.all([
-            Product.find(filter).skip(skip).limit(limit).lean(),
+            Product.find(filter).skip(skip).limit(limit).lean()
         ]);
         const dbTime = performance.now() - dbStart;
 
