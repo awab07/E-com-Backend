@@ -38,7 +38,7 @@ export const OrderCreator = async (req, res) => {
             }
         }
 
-        // FIX: Batch-fetch all products in ONE query instead of N separate queries
+        
         const productIds = items.map(i => i.productId);
         const products = await Product.find({ _id: { $in: productIds } });
         const productMap = {};
@@ -46,7 +46,7 @@ export const OrderCreator = async (req, res) => {
             productMap[p._id.toString()] = p;
         }
 
-        // Validate stock and build processed items
+        
         let processedItems = [];
         let totalAmount = 0;
         let totalItems = 0;
@@ -242,7 +242,7 @@ export const UpdateOrderStatus = async (req, res) => {
         }
 
         if (status === "delivered" && order.status !== "delivered") {
-            // FIX: Use findOneAndUpdate with $inc to avoid race condition on stats
+            
             await StoreStats.findOneAndUpdate(
                 {},
                 {

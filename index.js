@@ -12,6 +12,7 @@ import orderrouter from "./Routes/orderRoutes.js";
 import { swaggerSpec } from "./services/swagger.js";
 import cookieParser from "cookie-parser";
 import posRouter from "./Routes/posRoutes.js";
+import responseTime from "response-time";
 
 dotenv.config();
 dns.setDefaultResultOrder("ipv4first");
@@ -32,6 +33,7 @@ app.use(cors({
 app.use(express.json())
 app.use(cookieParser());
 app.use(logger)
+app.use(responseTime())
 
 app.get("/api-docs/spec", (req, res) => res.json(swaggerSpec));
 app.get("/api-docs", (req, res) => {

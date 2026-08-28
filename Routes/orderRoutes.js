@@ -74,16 +74,248 @@ orderrouter.get("/", protection, getOrders)
  *   get:
  *     tags:
  *       - Orders (Admin)
- *     summary: Get all orders (Admin only)
+ *     summary: Get all orders (Admin only, paginated)
+ *     description: >
+ *       Returns a paginated list of all non-archived orders.
+ *       Supports filtering by order status. Requires Admin bearer token.
+ *       Results sorted by newest first.
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *           minimum: 1
+ *         required: false
+ *         description: Page number to fetch
+ *         example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *           minimum: 1
+ *           maximum: 100
+ *         required: false
+ *         description: Number of orders per page (max 100)
+ *         example: 10
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum:
+ *             - pending
+ *             - confirmed
+ *             - shipped
+ *             - delivered
+ *             - cancelled
+ *         required: false
+ *         description: Filter orders by status
+ *         example: pending
  *     responses:
  *       200:
  *         description: Orders fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Orders Fetched Successfully!
+ *                 currentPage:
+ *                   type: integer
+ *                   example: 1
+ *                 totalPages:
+ *                   type: integer
+ *                   example: 8
+ *                 totalItems:
+ *                   type: integer
+ *                   example: 78
+ *                 itemsPerPage:
+ *                   type: integer
+ *                   example: 10
+ *                 orders:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       _id:
+ *                         type: string
+ *                         example: 64f1c2a1b2c3d4e5f6789012
+ *                       status:
+ *                         type: string
+ *                         enum: [pending, confirmed, shipped, delivered, cancelled]
+ *                         example: pending
+ *                       totalAmount:
+ *                         type: number
+ *                         example: 2400
+ *                       totalItems:
+ *                         type: integer
+ *                         example: 2
+ *                       paymentMethod:
+ *                         type: string
+ *                         enum: [Cash On Delivery, Stripe, JazzCash, EasyPaisa]
+ *                         example: Cash On Delivery
+ *                       paymentStatus:
+ *                         type: string
+ *                         enum: [pending, paid, failed]
+ *                         example: pending
+ *                       isGuestOrder:
+ *                         type: boolean
+ *                         example: false
+ *                       estimatedDelivery:
+ *                         type: string
+ *                         format: date-time
+ *                         example: 2026-09-01T00:00:00.000Z
+ *                       deliveredAt:
+ *                         type: string
+ *                         format: date-time
+ *                         nullable: true
+ *                         example: null
+ *                       shippingAddress:
+ *                         type: object
+ *                         properties:
+ *                           street:
+ *                             type: string
+ *                             example: 12 Main Street
+ *                           city:
+ *                             type: string
+ *                             example: Lahore
+ *                           province:
+ *                             type: string
+ *                             example: Punjab
+ *                           postalCode:
+ *                             type: string
+ *                             example: "54000"
+ *                           country:
+ *                             type: string
+ *                             example: Pakistan
+ *                       user:
+ *                         type: object
+ *                         nullable: true
+ *                         description: null if guest order
+ *                         properties:
+ *                           _id:
+ *                             type: string
+ *                             example: 64f1c2a1b2c3d4e5f6789099
+ *                           firstname:
+ *                             type: string
+ *                             example: Ali
+ *                           lastname:
+ *                             type: string
+ *                             example: Hassan
+ *                           email:
+ *                             type: string
+ *                             example: ali@example.com
+ *                           phno:
+ *                             type: string
+ *                             example: "+923001234567"
+ *                       guestInfo:
+ *                         type: object
+ *                         nullable: true
+ *                         description: null if registered user order
+ *                         properties:
+ *                           firstName:
+ *                             type: string
+ *                             example: Sara
+ *                           lastName:
+ *                             type: string
+ *                             example: Khan
+ *                           email:
+ *                             type: string
+ *                             example: sara@example.com
+ *                           phone:
+ *                             type: string
+ *                             example: "+923009876543"
+ *                       items:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             quantity:
+ *                               type: integer
+ *                               example: 2
+ *                             price:
+ *                               type: number
+ *                               example: 1200
+ *                             product:
+ *                               type: object
+ *                               properties:
+ *                                 _id:
+ *                                   type: string
+ *                                   example: 64f1c2a1b2c3d4e5f6789013
+ *                                 name:
+ *                                   type: string
+ *                                   example: iPhone 15 Pro
+ *                                 price:
+ *                                   type: number
+ *                                   example: 1200
+ *                                 category:
+ *                                   type: string
+ *                                   example: electronics
+ *                                 image:
+ *                                   type: array
+ *                                   items:
+ *                                     type: object
+ *                                     properties:
+ *                                       url:
+ *                                         type: string
+ *                                         example: https://res.cloudinary.com/demo/image/upload/sample.jpg
+ *                                       public_id:
+ *                                         type: string
+ *                                         example: product_images/sample
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: 2026-08-28T10:30:00.000Z
  *       401:
- *         description: Unauthorized
+ *         description: Unauthorized — token missing or expired
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Access token expired. Please refresh.
+ *                 expired:
+ *                   type: boolean
+ *                   example: true
  *       403:
- *         description: Forbidden
+ *         description: Forbidden — Admin access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Access Denied: Admins only!"
+ *       500:
+ *         description: Internal Server Error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Internal Server Error
  */
 orderrouter.get("/admin", protection, getAllOrderForAdmin)
 /**

@@ -29,6 +29,7 @@
     "parser": "^0.1.4",
     "react-router-dom": "^7.15.1",
     "redoc-express": "^2.1.3",
+    "response-time": "^2.3.4",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-dist": "^5.32.13",
     "swagger-ui-express": "^5.0.1"
