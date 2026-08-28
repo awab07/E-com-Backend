@@ -10296,3 +10296,7 @@
 2026-08-11T19:34:01.096Z | GET | /api-docs/favicon-32x32.png
 2026-08-11T19:58:07.167Z | POST | /Api/login
 2026-08-11T19:59:41.015Z | POST | /Api/login
+2026-08-28T13:26:59.292Z | GET | /api-docs
+2026-08-28T13:27:00.616Z | GET | /api-docs/spec
+2026-08-28T13:27:00.651Z | GET | /favicon.ico
+2026-08-28T13:27:37.390Z | GET | /Product/allproducts?page=1&limit=10
