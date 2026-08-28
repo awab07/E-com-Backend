@@ -5,102 +5,237 @@ import cloudinary from "../services/cloudinary.js";
 
 export const ProductCreator = async (req, res) => {
     try {
-        const { name, description, price, stock, category } = req.body
-        const existedProduct = await Product.findOne({ name, category })
-        if (existedProduct) return res.status(409).json({ message: "Product Already in the Database!" })
-        if (!name || !price || !stock || !category) return res.status(400).json({ message: "Please fill the required fields!" })
-        if (description && description.length < 10) return res.status(400).json({ message: "Description must be 10 characters long!" })
-        if (price <= 0) return res.status(400).json({ message: "Price must be greater than 0!" })
-        if (stock < 0) return res.status(400).json({ message: "Stock must be Greater than 0!" })
+        const { name, description, price, stock, category } = req.body;
 
-        let image = [];
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
-                const fileuri = getdatauri(file);
-                const cloud_res = await cloudinary.uploader.upload(fileuri, {
-                    folder: "product_images",
-                });
-                image.push({
-                    url: cloud_res.secure_url,
-                    public_id: cloud_res.public_id,
-                });
-            }
+        
+        if (!name || !price || stock === undefined || !category) {
+            return res.status(400).json({
+                success: false,
+                message: "Please fill the required fields!"
+            });
         }
 
-        const newProduct = await Product.create({ name, description, price, stock, category, image })
-        return res.status(201).json({ success: true, message: "Product Created Successfully", newProduct })
+        // Validate values
+        if (description && description.length < 10) {
+            return res.status(400).json({
+                success: false,
+                message: "Description must be 10 characters long!"
+            });
+        }
+
+        if (price <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Price must be greater than 0!"
+            });
+        }
+
+        if (stock < 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Stock must be greater than or equal to 0!"
+            });
+        }
+
+        
+        const existedProduct = await Product.findOne({
+            name,
+            category
+        }).lean();
+
+        if (existedProduct) {
+            return res.status(409).json({
+                success: false,
+                message: "Product Already in the Database!"
+            });
+        }
+
+        
+        let image = [];
+
+        if (req.files && req.files.length > 0) {
+
+            image = await Promise.all(
+                req.files.map(async (file) => {
+
+                    const fileuri = getdatauri(file);
+
+                    const cloud_res = await cloudinary.uploader.upload(
+                        fileuri,
+                        {
+                            folder: "product_images"
+                        }
+                    );
+
+                    return {
+                        url: cloud_res.secure_url,
+                        public_id: cloud_res.public_id
+                    };
+                })
+            );
+        }
+
+        
+        const newProduct = await Product.create({
+            name,
+            description,
+            price,
+            stock,
+            category,
+            image
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Product Created Successfully",
+            newProduct
+        });
+
     } catch (error) {
-        return res.status(500).json({ message: error.message })
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
-}
+};
 
 export const getAllProducts = async (req, res) => {
     try {
-        const page     = parseInt(req.query.page)  || 1;
-        const limit    = parseInt(req.query.limit) || 10;
-        const category = req.query.category        || null;
-        const search   = req.query.search          || null;
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+
+        const category = req.query.category?.trim() || null;
+        const search = req.query.search?.trim() || null;
 
         const filter = {};
-        if (category) filter.category = category;
-        if (search)   filter.name = { $regex: search, $options: "i" }; 
+
+        // Category filter
+        if (category) {
+            filter.category = category;
+        }
+
+        // Search
+        if (search) {
+            filter.$text = { $search: search };
+        }
+
         const skip = (page - 1) * limit;
+
         const [products, totalItems] = await Promise.all([
-            Product.find(filter).skip(skip).limit(limit),
+            Product.find(filter)
+                .select("name description price stock image category brand discount createdAt")
+                .sort({ createdAt: -1, _id: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean(),
+
             Product.countDocuments(filter)
         ]);
 
         return res.status(200).json({
-            success:     true,
-            message:     "Products Fetched Successfully",
+            success: true,
+            message: "Products Fetched Successfully",
             currentPage: page,
-            totalPages:  Math.ceil(totalItems / limit),
+            totalPages: Math.ceil(totalItems / limit),
             totalItems,
             itemsPerPage: limit,
             products
         });
+
     } catch (error) {
-        return res.status(500).json({ message: error.message })
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
-}
+};
 
 export const ProductUpdater = async (req, res) => {
     try {
         const { name, description, price, stock, category } = req.body;
         const { id } = req.params;
 
+        // Required fields
         if (!name || !price || !stock || !category) {
-            return res.status(400).json({ success: false, message: "All fields are required!" });
+            return res.status(400).json({
+                success: false,
+                message: "All fields are required!"
+            });
         }
 
-        const old_product = await Product.findById(id);
-        if (!old_product) {
-            return res.status(404).json({ success: false, message: "Product Not Found!" });
-        }
-
+        // Upload all images at the same time
         let newImages = [];
+
         if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
-                const fileuri = getdatauri(file);
-                const cloud_res = await cloudinary.uploader.upload(fileuri, { folder: "product_images" });
-                newImages.push({ public_id: cloud_res.public_id, url: cloud_res.secure_url });
-            }
+
+            newImages = await Promise.all(
+                req.files.map(async (file) => {
+
+                    const fileuri = getdatauri(file);
+
+                    const cloud_res = await cloudinary.uploader.upload(
+                        fileuri,
+                        {
+                            folder: "product_images"
+                        }
+                    );
+
+                    return {
+                        public_id: cloud_res.public_id,
+                        url: cloud_res.secure_url
+                    };
+                })
+            );
         }
 
-        const updatedImages = [...(old_product.image || []), ...newImages];
+        // Update product
+        const updateData = {
+            name,
+            description,
+            price,
+            stock,
+            category
+        };
+
+        // Only modify images when new images are uploaded
+        if (newImages.length > 0) {
+            updateData.$push = {
+                image: {
+                    $each: newImages
+                }
+            };
+        }
 
         const product = await Product.findByIdAndUpdate(
             id,
-            { name, description, price, stock, category, image: updatedImages },
-            { new: true }
-        );
+            updateData,
+            {
+                new: true,
+                runValidators: true
+            }
+        ).lean();
 
-        return res.status(200).json({ success: true, message: "Product Updated Successfully!", product });
+        // Product doesn't exist
+        if (!product) {
+            return res.status(404).json({
+                success: false,
+                message: "Product Not Found!"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Product Updated Successfully!",
+            product
+        });
+
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 };
-
 export const ProductDeleter = async (req, res) => {
     try {
         const { id } = req.params;
