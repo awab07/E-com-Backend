@@ -7,7 +7,7 @@ export const ProductCreator = async (req, res) => {
     try {
         const { name, description, price, stock, category } = req.body;
 
-        
+
         if (!name || !price || stock === undefined || !category) {
             return res.status(400).json({
                 success: false,
@@ -37,7 +37,7 @@ export const ProductCreator = async (req, res) => {
             });
         }
 
-        
+
         const existedProduct = await Product.findOne({
             name,
             category
@@ -50,7 +50,7 @@ export const ProductCreator = async (req, res) => {
             });
         }
 
-        
+
         let image = [];
 
         if (req.files && req.files.length > 0) {
@@ -75,7 +75,7 @@ export const ProductCreator = async (req, res) => {
             );
         }
 
-        
+
         const newProduct = await Product.create({
             name,
             description,
@@ -101,54 +101,37 @@ export const ProductCreator = async (req, res) => {
 
 export const getAllProducts = async (req, res) => {
     try {
-        const page = Math.max(parseInt(req.query.page) || 1, 1);
-        const limit = Math.min(parseInt(req.query.limit) || 10, 50);
-
-        const category = req.query.category?.trim() || null;
-        const search = req.query.search?.trim() || null;
+        const start = performance.now();
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const category = req.query.category || null;
+        const search = req.query.search || null;
 
         const filter = {};
-
-        // Category filter
-        if (category) {
-            filter.category = category;
-        }
-
-        // Search
-        if (search) {
-            filter.$text = { $search: search };
-        }
-
+        if (category) filter.category = category;
+        if (search) filter.name = { $regex: search, $options: "i" };
         const skip = (page - 1) * limit;
-
+        const dbStart = performance.now();
         const [products, totalItems] = await Promise.all([
-            Product.find(filter)
-                .select("name description price stock image category brand discount createdAt")
-                .sort({ createdAt: -1, _id: -1 })
-                .skip(skip)
-                .limit(limit)
-                .lean(),
-
-            Product.countDocuments(filter)
+            Product.find(filter).skip(skip).limit(limit).lean()
         ]);
+        const dbTime = performance.now() - dbStart;
+
+        console.log("DB TIME:", dbTime.toFixed(2), "ms");
+        console.log("TOTAL TIME:", (performance.now() - start).toFixed(2), "ms");
 
         return res.status(200).json({
             success: true,
             message: "Products Fetched Successfully",
             currentPage: page,
-            totalPages: Math.ceil(totalItems / limit),
             totalItems,
             itemsPerPage: limit,
             products
         });
-
     } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        return res.status(500).json({ message: error.message })
     }
-};
+}
 
 export const ProductUpdater = async (req, res) => {
     try {
@@ -163,7 +146,7 @@ export const ProductUpdater = async (req, res) => {
             });
         }
 
-        // Upload all images at the same time
+        
         let newImages = [];
 
         if (req.files && req.files.length > 0) {
