@@ -36,88 +36,34 @@ export const ProductCreator = async (req, res) => {
 
 export const getAllProducts = async (req, res) => {
     try {
-        const limit = Math.min(parseInt(req.query.limit) || 10, 50);
-
-        const category = req.query.category?.trim() || null;
-        const search = req.query.search?.trim() || null;
-        const cursor = req.query.cursor || null;
+        const page     = parseInt(req.query.page)  || 1;
+        const limit    = parseInt(req.query.limit) || 10;
+        const category = req.query.category        || null;
+        const search   = req.query.search          || null;
 
         const filter = {};
-
-        // Category filter
-        if (category) {
-            filter.category = category;
-        }
-
-        // Search filter
-        if (search) {
-            filter.$text = { $search: search };
-        }
-
-        // Cursor filter
-        if (cursor) {
-            const decodedCursor = JSON.parse(
-                Buffer.from(cursor, "base64").toString("utf-8")
-            );
-
-            filter.$or = [
-                {
-                    createdAt: {
-                        $lt: new Date(decodedCursor.createdAt)
-                    }
-                },
-                {
-                    createdAt: new Date(decodedCursor.createdAt),
-                    _id: {
-                        $lt: decodedCursor._id
-                    }
-                }
-            ];
-        }
-
-        const products = await Product.find(filter)
-            .select("name description price stock image category brand discount createdAt")
-            .sort({ createdAt: -1, _id: -1 })
-            .limit(limit + 1)
-            .lean();
-
-        const hasNext = products.length > limit;
-
-        if (hasNext) {
-            products.pop();
-        }
-
-        let nextCursor = null;
-
-        if (hasNext && products.length > 0) {
-            const lastProduct = products[products.length - 1];
-
-            const cursorData = {
-                createdAt: lastProduct.createdAt,
-                _id: lastProduct._id
-            };
-
-            nextCursor = Buffer.from(
-                JSON.stringify(cursorData)
-            ).toString("base64");
-        }
+        if (category) filter.category = category;
+        if (search)   filter.name = { $regex: search, $options: "i" }; 
+        const skip = (page - 1) * limit;
+        const [products, totalItems] = await Promise.all([
+            Product.find(filter).skip(skip).limit(limit),
+            Product.countDocuments(filter)
+        ]);
 
         return res.status(200).json({
-            success: true,
-            message: "Products Fetched Successfully",
+            success:     true,
+            message:     "Products Fetched Successfully",
+            currentPage: page,
+            totalPages:  Math.ceil(totalItems / limit),
+            totalItems,
             itemsPerPage: limit,
-            hasNext,
-            nextCursor,
             products
         });
-
     } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message
-        });
+        return res.status(500).json({ message: error.message })
     }
-};
+}
+
 export const ProductUpdater = async (req, res) => {
     try {
         const { name, description, price, stock, category } = req.body;
