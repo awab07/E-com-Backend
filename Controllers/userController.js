@@ -11,7 +11,7 @@ export const registerUser = async (req, res) => {
     try {
         const { firstname, lastname, email, password, phno } = req.body;
 
-        
+
         if (!firstname || !email || !password || !phno) {
             return res.status(400).json({ message: "Please fill all required fields!" });
         }
@@ -32,7 +32,7 @@ export const registerUser = async (req, res) => {
 
         const HashedPassword = await bcrypt.hash(password, 10);
 
-        
+
         const otp = OTP_gen();
         const hashedOtp = await bcrypt.hash(otp, 10);
 
@@ -48,7 +48,7 @@ export const registerUser = async (req, res) => {
 
         await sendOTPEmail(email, otp);
 
-        
+
         return res.status(201).json({
             success: true,
             message: "User Registered Successfully! Please check your email for OTP verification.",
@@ -80,13 +80,11 @@ export const Loginuser = async (req, res) => {
 
         const refreshTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-        // Run token generation and DB update in parallel
         const [accessToken, refreshToken] = await Promise.all([
             generateAccessToken(user),
             generateRefreshToken(user)
         ]);
 
-        // updateOne instead of save() — much faster, no full document overhead
         await User.updateOne(
             { _id: user._id },
             { refreshToken, refreshTokenExpiry }
@@ -224,7 +222,7 @@ export const UpdateUser = async (req, res) => {
 
 export const getuserbyid = async (req, res) => {
     try {
-        
+
         const user = await User.findById(req.user.id).select(safeUserFields).lean();
         if (!user) return res.status(404).json({ success: false, message: "User Not Found!" });
         return res.status(200).json({ success: true, message: "User Fetched Successfully!", user });
@@ -319,7 +317,7 @@ export const getalluserforadmin = async (req, res) => {
         }
 
         const [users, totalItems] = await Promise.all([
-            
+
             User.find(filter)
                 .select(safeUserFields)
                 .skip(skip)
