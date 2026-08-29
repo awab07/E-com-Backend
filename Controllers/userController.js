@@ -11,43 +11,48 @@ export const registerUser = async (req, res) => {
     try {
         const { firstname, lastname, email, password, phno } = req.body;
 
-
-        if (!firstname || !email || !password || !phno) {
+        // Validations
+        if (!firstname || !email || !password || !phno)
             return res.status(400).json({ message: "Please fill all required fields!" });
-        }
-        if (!firstname.match(/^[a-zA-Z\s]+$/)) return res.status(400).json({ message: "Invalid Firstname!" });
-        if (lastname && !lastname.match(/^[a-zA-Z\s]+$/)) return res.status(400).json({ message: "Invalid Lastname!" });
-        if (!phno.match(/^\+?\d{10,15}$/)) return res.status(400).json({ message: "Invalid Phone Number!" });
-        if (password.length < 6) return res.status(400).json({ message: "Password must be 6 characters long!" });
+        if (!firstname.match(/^[a-zA-Z\s]+$/))
+            return res.status(400).json({ message: "Invalid Firstname!" });
+        if (lastname && !lastname.match(/^[a-zA-Z\s]+$/))
+            return res.status(400).json({ message: "Invalid Lastname!" });
+        if (!phno.match(/^\+?\d{10,15}$/))
+            return res.status(400).json({ message: "Invalid Phone Number!" });
+        if (password.length < 6)
+            return res.status(400).json({ message: "Password must be 6 characters long!" });
         if (!password.match(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{6,}$/))
             return res.status(400).json({ message: "Password must contain at least one uppercase letter, one lowercase letter, one number and one special character!" });
-        if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return res.status(400).json({ message: "Invalid Email!" });
-
-        const [userExists, phoneExists] = await Promise.all([
-            User.findOne({ email }).lean(),
-            User.findOne({ phno }).lean()
-        ]);
-        if (phoneExists) return res.status(400).json({ message: "User with that Phone Number Already in Database!" });
-        if (userExists) return res.status(400).json({ message: "User Already in Database!" });
-
-        const HashedPassword = await bcrypt.hash(password, 10);
+        if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/))
+            return res.status(400).json({ message: "Invalid Email!" });
 
 
         const otp = OTP_gen();
-        const hashedOtp = await bcrypt.hash(otp, 10);
 
-        const user = await User.create({
-            email,
-            firstname,
-            lastname,
-            password: HashedPassword,
-            phno,
-            otp: hashedOtp,
-            otp_expiry: Date.now() + 5 * 60 * 1000
-        });
+        const [userExists, phoneExists, hashedPassword, hashedOtp] = await Promise.all([
+            User.findOne({ email }).lean(),
+            User.findOne({ phno }).lean(),
+            bcrypt.hash(password, 10),
+            bcrypt.hash(otp, 10)
+        ]);
 
-        await sendOTPEmail(email, otp);
+        if (phoneExists) return res.status(400).json({ message: "User with that Phone Number Already in Database!" });
+        if (userExists) return res.status(400).json({ message: "User Already in Database!" });
 
+        
+        const [user] = await Promise.all([
+            User.create({
+                email,
+                firstname,
+                lastname,
+                password: hashedPassword,
+                phno,
+                otp: hashedOtp,
+                otp_expiry: Date.now() + 5 * 60 * 1000
+            }),
+            sendOTPEmail(email, otp)
+        ]);
 
         return res.status(201).json({
             success: true,
@@ -60,6 +65,7 @@ export const registerUser = async (req, res) => {
                 phno: user.phno
             }
         });
+
     } catch (error) {
         return res.status(500).json({ message: error.message });
     }
@@ -265,7 +271,7 @@ export const reverify = async (req, res) => {
         if (existed_user.isverified) return res.status(400).json({ success: false, message: "User is already verified." });
 
         const otp = OTP_gen();
-        // FIX: Hash OTP before storing
+        
         const hashedOtp = await bcrypt.hash(otp, 10);
         existed_user.otp = hashedOtp;
         existed_user.otp_expiry = Date.now() + 5 * 60 * 1000;
@@ -302,22 +308,17 @@ export const changeUserStatus = async (req, res) => {
 
 export const getalluserforadmin = async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 10, 50);
         const search = req.query.search || null;
         const skip = (page - 1) * limit;
 
         const filter = {};
         if (search) {
-            filter.$or = [
-                { firstname: { $regex: search, $options: "i" } },
-                { lastname: { $regex: search, $options: "i" } },
-                { email: { $regex: search, $options: "i" } }
-            ];
+            filter.$text = { $search: search }; 
         }
 
         const [users, totalItems] = await Promise.all([
-
             User.find(filter)
                 .select(safeUserFields)
                 .skip(skip)
@@ -336,6 +337,7 @@ export const getalluserforadmin = async (req, res) => {
             itemsPerPage: limit,
             users
         });
+
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
