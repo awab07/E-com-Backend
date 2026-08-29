@@ -149,7 +149,7 @@ export const getOrders = async (req, res) => {
 
         const dbStart = performance.now();
 
-        // Query 1 — fetch orders only
+        
         const my_orders = await Order.find({ user: userID })
             .sort({ createdAt: -1 })
             .skip(skip)
@@ -157,7 +157,7 @@ export const getOrders = async (req, res) => {
             .select("-__v -isArchived")
             .lean();
 
-        // Query 2 — fetch all products in one shot
+        
         const productIds = my_orders.flatMap(order =>
             order.items.map(item => item.product)
         );
@@ -168,7 +168,7 @@ export const getOrders = async (req, res) => {
 
         const dbTime = performance.now() - dbStart;
 
-        // Map products to orders in memory — no DB hit
+        
         const productMap = new Map(products.map(p => [p._id.toString(), p]));
 
         const ordersWithProducts = my_orders.map(order => ({
@@ -260,7 +260,6 @@ export const UpdateOrderStatus = async (req, res) => {
             return res.status(400).json({ success: false, message: `Can't change the status ${order.status} to ${status}` });
         }
 
-        // FIX: Batch stock restoration on cancellation using bulkWrite
         if (status === "cancelled" && order.status !== "cancelled") {
             const bulkOps = order.items.map(item => ({
                 updateOne: {
