@@ -145,38 +145,49 @@ export const getOrders = async (req, res) => {
 
         const page = Math.max(parseInt(req.query.page) || 1, 1);
         const limit = Math.min(parseInt(req.query.limit) || 10, 50);
-
         const skip = (page - 1) * limit;
 
         const dbStart = performance.now();
 
+        // Query 1 — fetch orders only
         const my_orders = await Order.find({ user: userID })
-            .populate("items.product")
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limit)
+            .select("-__v -isArchived")
+            .lean();
+
+        // Query 2 — fetch all products in one shot
+        const productIds = my_orders.flatMap(order =>
+            order.items.map(item => item.product)
+        );
+
+        const products = await Product.find({ _id: { $in: productIds } })
+            .select("name price images sku")
             .lean();
 
         const dbTime = performance.now() - dbStart;
 
-        console.log(
-            "ORDERS DB TIME:",
-            dbTime.toFixed(2),
-            "ms"
-        );
+        // Map products to orders in memory — no DB hit
+        const productMap = new Map(products.map(p => [p._id.toString(), p]));
 
-        console.log(
-            "ORDERS TOTAL TIME:",
-            (performance.now() - start).toFixed(2),
-            "ms"
-        );
+        const ordersWithProducts = my_orders.map(order => ({
+            ...order,
+            items: order.items.map(item => ({
+                ...item,
+                product: productMap.get(item.product.toString())
+            }))
+        }));
+
+        console.log("ORDERS DB TIME:", dbTime.toFixed(2), "ms");
+        console.log("ORDERS TOTAL TIME:", (performance.now() - start).toFixed(2), "ms");
 
         return res.status(200).json({
             success: true,
             message: "Orders Fetched Successfully!",
             currentPage: page,
             itemsPerPage: limit,
-            my_orders
+            my_orders: ordersWithProducts
         });
 
     } catch (error) {
