@@ -139,32 +139,51 @@ export const OrderCreator = async (req, res) => {
 
 export const getOrders = async (req, res) => {
     try {
+        const start = performance.now();
+
         const userID = req.user.id;
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
+
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+
         const skip = (page - 1) * limit;
 
-        const [my_orders, totalItems] = await Promise.all([
-            Order.find({ user: userID })
-                .populate("items.product")
-                .skip(skip)
-                .limit(limit)
-                .sort({ createdAt: -1 })
-                .lean(),
-            Order.countDocuments({ user: userID })
-        ]);
+        const dbStart = performance.now();
+
+        const my_orders = await Order.find({ user: userID })
+            .populate("items.product")
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        const dbTime = performance.now() - dbStart;
+
+        console.log(
+            "ORDERS DB TIME:",
+            dbTime.toFixed(2),
+            "ms"
+        );
+
+        console.log(
+            "ORDERS TOTAL TIME:",
+            (performance.now() - start).toFixed(2),
+            "ms"
+        );
 
         return res.status(200).json({
             success: true,
             message: "Orders Fetched Successfully!",
             currentPage: page,
-            totalPages: Math.ceil(totalItems / limit),
-            totalItems,
             itemsPerPage: limit,
             my_orders
         });
+
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
     }
 };
 
@@ -350,7 +369,7 @@ export const getStatsStore = async (req, res) => {
                 { $sort: { "_id.year": 1, "_id.month": 1 } }
             ]),
             // FIX: totalOrders was never populated — compute it live
-            Order.countDocuments({})
+            
         ]);
 
         if (!StoreStates) return res.status(404).json({ success: false, message: "No Stats Found!" });

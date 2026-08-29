@@ -5,22 +5,33 @@ const posClient = axios.create({
     headers: {
         "Authorization": `Bearer ${process.env.LIGHTSPEED_ACCESS_TOKEN}`,
         "Content-Type": "application/json"
-    }
+    },
+    timeout: 55000 // just under 1 min to avoid hanging
 });
 
-export const getPOSProducts = async ({ page_size, after, before, deleted, sku, name, include_images }) => {
-    const response = await posClient.get("/products", {
+// Generic paginated fetcher — reused across all endpoints
+const fetchPaginated = async (endpoint, params = {}) => {
+    const response = await posClient.get(endpoint, {
         params: {
-            page_size,
-            after,
-            before,
-            deleted,
-            sku,
-            name,
-            include_images
+            page_size: params.page_size || 250, // max allowed — fewer round trips
+            ...(params.after  && { after: params.after }),
+            ...(params.before && { before: params.before }),
+            ...params.extra   // any endpoint-specific params
         }
     });
     return response.data;
+};
+
+export const getPOSProducts = async (params = {}) => {
+    return fetchPaginated("/products", {
+        ...params,
+        extra: {
+            ...(params.sku            && { sku: params.sku }),
+            ...(params.name           && { name: params.name }),
+            ...(params.deleted        !== undefined && { deleted: params.deleted }),
+            ...(params.include_images !== undefined && { include_images: params.include_images })
+        }
+    });
 };
 
 export const getPOSProductById = async (id) => {
@@ -28,16 +39,10 @@ export const getPOSProductById = async (id) => {
     return response.data;
 };
 
-export const getPOSCategories = async ({ page_size, after, before }) => {
-    const response = await posClient.get("/product_categories", {
-        params: { page_size, after, before }
-    });
-    return response.data;
+export const getPOSCategories = async (params = {}) => {
+    return fetchPaginated("/product_categories", params);
 };
 
-export const getPOSInventory = async ({ page_size, after, before }) => {
-    const response = await posClient.get("/inventory", {
-        params: { page_size, after, before }
-    });
-    return response.data;
+export const getPOSInventory = async (params = {}) => {
+    return fetchPaginated("/inventory", params);
 };
