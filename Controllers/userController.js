@@ -68,21 +68,29 @@ export const registerUser = async (req, res) => {
 export const Loginuser = async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await User.findOne({ email });
+
+        const user = await User.findOne({ email }).select("+password");
         if (!user) return res.status(400).json({ message: "User not found please register first!" });
+
         const match = await bcrypt.compare(password, user.password);
         if (!match) return res.status(400).json({ message: "Invalid Credentials!" });
+
         if (!user.isverified) return res.status(401).json({ message: "Please verify Your email first!", verified: false, email: user.email });
         if (!user.isActive) return res.status(403).json({ message: "Your account is not active.", active: false });
 
+        const refreshTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+        // Run token generation and DB update in parallel
         const [accessToken, refreshToken] = await Promise.all([
             generateAccessToken(user),
             generateRefreshToken(user)
         ]);
 
-        user.refreshToken = refreshToken;
-        user.refreshTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-        await user.save();
+        // updateOne instead of save() — much faster, no full document overhead
+        await User.updateOne(
+            { _id: user._id },
+            { refreshToken, refreshTokenExpiry }
+        );
 
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
@@ -91,7 +99,6 @@ export const Loginuser = async (req, res) => {
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 
-        
         return res.status(200).json({
             success: true,
             message: "User Logged in Successfully!",
@@ -108,6 +115,7 @@ export const Loginuser = async (req, res) => {
                 isActive: user.isActive
             }
         });
+
     } catch (error) {
         return res.status(500).json({ message: error.message });
     }
