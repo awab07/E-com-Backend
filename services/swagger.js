@@ -11,7 +11,7 @@ const options = {
         
         servers: [
             {
-                url: "https://e-commerce-store-backend-one.vercel.app",
+                url: "https://triple-buzz-store-backend-one.vercel.app",
                 description: "Production Server"
             },
             {

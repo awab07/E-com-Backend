@@ -181,46 +181,47 @@ export const logout = async (req, res) => {
 export const UpdateUser = async (req, res) => {
     try {
         const userID = req.user.id;
-        const user = await User.findById(userID);
-        if (!user) return res.status(404).json({ success: false, message: "User Not Found!" });
 
         const { firstname, lastname, password, phno, street, city, province, postalCode, country } = req.body;
 
-        if (firstname?.trim()) user.firstname = firstname.trim();
-        if (lastname?.trim()) user.lastname = lastname.trim();
-        if (phno?.trim()) user.phno = phno.trim();
+        const updateFields = {};
+
+        if (firstname?.trim()) updateFields.firstname = firstname.trim();
+        if (lastname?.trim()) updateFields.lastname = lastname.trim();
+        if (phno?.trim()) updateFields.phno = phno.trim();
 
         if (password && password.trim() !== "") {
             if (password.length < 6)
                 return res.status(400).json({ success: false, message: "Password must be at least 6 characters long!" });
-            user.password = await bcrypt.hash(password, 10);
+            updateFields.password = await bcrypt.hash(password, 10);
         }
 
         if (street || city || province || postalCode || country) {
-            user.address = {
-                street: street ?? user.address?.street ?? "",
-                city: city ?? user.address?.city ?? "",
-                province: province ?? user.address?.province ?? "",
-                postalCode: postalCode ?? user.address?.postalCode ?? "",
-                country: country ?? user.address?.country ?? "",
+            
+            const existing = await User.findById(userID).select("address").lean();
+            updateFields.address = {
+                street:     street      ?? existing.address?.street      ?? "",
+                city:       city        ?? existing.address?.city        ?? "",
+                province:   province    ?? existing.address?.province    ?? "",
+                postalCode: postalCode  ?? existing.address?.postalCode  ?? "",
+                country:    country     ?? existing.address?.country     ?? "",
             };
         }
 
-        await user.save();
+        const user = await User.findByIdAndUpdate(
+            userID,
+            { $set: updateFields },
+            { new: true, runValidators: true }
+        ).select("_id firstname lastname email phno address role").lean();
+
+        if (!user) return res.status(404).json({ success: false, message: "User Not Found!" });
 
         return res.status(200).json({
             success: true,
             message: "Profile Updated Successfully!",
-            user: {
-                _id: user._id,
-                firstname: user.firstname,
-                lastname: user.lastname,
-                email: user.email,
-                phno: user.phno,
-                address: user.address,
-                role: user.role
-            },
+            user
         });
+
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -246,7 +247,7 @@ export const verifyOTP = async (req, res) => {
         if (!existingmail.otp) return res.status(400).json({ success: false, message: "OTP Not Found" });
         if (existingmail.otp_expiry < Date.now()) return res.status(400).json({ success: false, message: "OTP Expired!" });
 
-        // FIX: Compare against hashed OTP
+        
         const isOtpValid = await bcrypt.compare(otp, existingmail.otp);
         if (!isOtpValid) return res.status(400).json({ success: false, message: "Invalid OTP" });
 
@@ -325,7 +326,6 @@ export const getalluserforadmin = async (req, res) => {
                 .limit(limit)
                 .sort({ createdAt: -1 })
                 .lean(),
-            User.countDocuments(filter)
         ]);
 
         return res.status(200).json({
