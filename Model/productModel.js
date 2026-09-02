@@ -54,7 +54,7 @@ const productSchema = new mongoose.Schema({
     category: {
         type: String,
         required: true,
-        enum: ["electronics", "clothing", "food", "books"]
+        index: true
     },
     brand: {
         type: String

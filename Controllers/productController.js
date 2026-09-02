@@ -3,6 +3,33 @@ import { Product } from "../Model/productModel.js";
 import getdatauri from "../Middleware/datauriparser.js";
 import cloudinary from "../services/cloudinary.js";
 
+// A product's stored discount.isActive is just the admin's on/off toggle — it
+// says nothing about whether today actually falls inside startDate/endDate.
+// This computes whether the discount is *live right now*, and the resulting
+// price, using the same percentage/fixed math OrderController already applies
+// at checkout — so what a storefront displays always matches what gets charged.
+function withEffectiveDiscount(product) {
+    const d = product.discount;
+    const now = new Date();
+
+    const discountActive = !!(
+        d && d.isActive && d.startDate && d.endDate &&
+        now >= new Date(d.startDate) && now <= new Date(d.endDate)
+    );
+
+    let finalPrice = product.price;
+    if (discountActive) {
+        if (d.discountType === "percentage") {
+            finalPrice = product.price - (product.price * d.value) / 100;
+        } else if (d.discountType === "fixed") {
+            finalPrice = product.price - d.value;
+        }
+    }
+    finalPrice = Math.round(finalPrice * 100) / 100;
+
+    return { ...product, discountActive, finalPrice };
+}
+
 export const ProductCreator = async (req, res) => {
     try {
         const { name, description, price, stock, category } = req.body;
@@ -126,7 +153,7 @@ export const getAllProducts = async (req, res) => {
             currentPage: page,
             totalItems,
             itemsPerPage: limit,
-            products
+            products: products.map(withEffectiveDiscount)
         });
     } catch (error) {
         return res.status(500).json({ message: error.message })
@@ -135,7 +162,7 @@ export const getAllProducts = async (req, res) => {
 
 export const ProductUpdater = async (req, res) => {
     try {
-        const { name, description, price, stock, category } = req.body;
+        const { name, description, price, stock, category } = req.body || {};
         const { id } = req.params;
 
         // Required fields
@@ -241,9 +268,9 @@ export const ProductDeleter = async (req, res) => {
 export const FindProductById = async (req, res) => {
     try {
         const { id } = req.params;
-        const product = await Product.findById(id)
+        const product = await Product.findById(id).lean()
         if (!product) return res.status(404).json({ success: false, message: "Product Not Found!" })
-        return res.status(200).json({ success: true, message: "Product Fetched Successfully!", product })
+        return res.status(200).json({ success: true, message: "Product Fetched Successfully!", product: withEffectiveDiscount(product) })
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message })
     }

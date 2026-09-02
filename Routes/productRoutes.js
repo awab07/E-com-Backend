@@ -198,6 +198,18 @@ productRoutes.post('/createProduct', multiStorage, protection, isAdmin, ProductC
  *                             type: string
  *                             format: date
  *                             example: 2026-08-31
+ *                       discountActive:
+ *                         type: boolean
+ *                         example: true
+ *                         description: >
+ *                           Computed at read time — true only if discount.isActive is true
+ *                           AND today falls within startDate/endDate. Use this instead of
+ *                           discount.isActive to decide whether to show a "% off" badge,
+ *                           since isActive alone doesn't account for expired or not-yet-started discounts.
+ *                       finalPrice:
+ *                         type: number
+ *                         example: 960
+ *                         description: price with the active discount applied (equals price when discountActive is false)
  *                       createdAt:
  *                         type: string
  *                         format: date-time
@@ -314,6 +326,10 @@ productRoutes.delete("/:id", protection, isAdmin, ProductDeleter)
  *     tags:
  *       - Products
  *     summary: Get product by ID
+ *     description: >
+ *       Response includes computed discountActive (true only if the discount is
+ *       currently within its date range, not just toggled on) and finalPrice
+ *       (price with any active discount applied) alongside the raw product fields.
  *     parameters:
  *       - in: path
  *         name: id
@@ -450,6 +466,8 @@ productRoutes.delete("/:id/image", protection, isAdmin, imageDeletor)
  *                       value: Fixed must be less than the actual product price!
  *                     invalidDate:
  *                       value: End date must be after start date.
+ *                     endDateInPast:
+ *                       value: End date must be in the future.
  *       401:
  *         description: Unauthorized or access token expired
  *       403:
