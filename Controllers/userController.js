@@ -96,10 +96,14 @@ export const Loginuser = async (req, res) => {
             { refreshToken, refreshTokenExpiry }
         );
 
+        // sameSite must be "none" (with secure: true) for the cookie to be sent at all
+        // on cross-site requests — the frontend and backend are on different domains.
+        // "strict"/"lax" only work when frontend and backend share the same site.
+        const isProd = process.env.NODE_ENV === "production";
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
+            secure: isProd,
+            sameSite: isProd ? "none" : "lax",
             maxAge: 7 * 24 * 60 * 60 * 1000,
         });
 
@@ -171,7 +175,12 @@ export const logout = async (req, res) => {
                 { refreshToken: null, refreshTokenExpiry: null }
             );
         }
-        res.clearCookie("refreshToken");
+        const isProd = process.env.NODE_ENV === "production";
+        res.clearCookie("refreshToken", {
+            httpOnly: true,
+            secure: isProd,
+            sameSite: isProd ? "none" : "lax",
+        });
         return res.status(200).json({ success: true, message: "Logged out successfully." });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
