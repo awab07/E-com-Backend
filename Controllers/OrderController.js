@@ -2,6 +2,7 @@ import { Order } from "../Model/OrderModel.js";
 import { Product } from "../Model/productModel.js"
 import { StoreStats } from "../Model/StoreStats.js";
 import { User } from "../Model/userModel.js"
+import { Address } from "../Model/AddressModel.js"
 
 export const OrderCreator = async (req, res) => {
     try {
@@ -123,6 +124,21 @@ export const OrderCreator = async (req, res) => {
         // Update user address if logged in
         if (user) {
             await User.findByIdAndUpdate(user._id, { address: shippingAddress });
+
+            // Save this shipping address to the user's address book too,
+            // unless the exact same address is already saved there.
+            await Address.findOneAndUpdate(
+                {
+                    user: user._id,
+                    street: shippingAddress.street,
+                    city: shippingAddress.city,
+                    province: shippingAddress.province,
+                    postalCode: shippingAddress.postalCode,
+                    country: shippingAddress.country
+                },
+                { $setOnInsert: { user: user._id, ...shippingAddress } },
+                { upsert: true, new: true }
+            );
         }
 
         await order.populate("items.product");
@@ -334,7 +350,7 @@ export const orderdeletionforAdmin = async (req, res) => {
 
 export const getArchiedOrders = async (req, res) => {
     try {
-        // FIX: Added pagination — archived orders can grow unboundedly
+        
         const page  = parseInt(req.query.page)  || 1;
         const limit = parseInt(req.query.limit) || 10;
         const skip  = (page - 1) * limit;
@@ -378,7 +394,7 @@ export const getStatsStore = async (req, res) => {
                 },
                 { $sort: { "_id.year": 1, "_id.month": 1 } }
             ]),
-            // FIX: totalOrders was never populated — compute it live
+            
             
         ]);
 

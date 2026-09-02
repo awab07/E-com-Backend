@@ -6,7 +6,7 @@ const posClient = axios.create({
         "Authorization": `Bearer ${process.env.LIGHTSPEED_ACCESS_TOKEN}`,
         "Content-Type": "application/json"
     },
-    timeout: 55000 // just under 1 min to avoid hanging
+    timeout: 55000 
 });
 
 // Generic paginated fetcher — reused across all endpoints
