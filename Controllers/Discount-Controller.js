@@ -37,6 +37,9 @@ export const discountController = async (req, res) => {
         if (new Date(startDate) >= new Date(endDate)) {
             return res.status(400).json({ success: false, message: "End date must be after start date." });
         }
+        if (new Date(endDate) < new Date()) {
+            return res.status(400).json({ success: false, message: "End date must be in the future." });
+        }
 
         product.discount = { isActive, discountType, value, startDate, endDate }
         await product.save()
