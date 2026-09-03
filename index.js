@@ -11,6 +11,7 @@ import productRoutes from "./Routes/productRoutes.js";
 import orderrouter from "./Routes/orderRoutes.js";
 import addressRoutes from "./Routes/addressRoutes.js";
 import wishlistRoutes from "./Routes/wishlistRoutes.js";
+import reviewRoutes from "./Routes/reviewRoutes.js";
 import { swaggerSpec } from "./services/swagger.js";
 import cookieParser from "cookie-parser";
 import posRouter from "./Routes/posRoutes.js";
@@ -112,6 +113,7 @@ app.use("/Product", productRoutes)
 app.use("/Order",   orderrouter)
 app.use("/Address", addressRoutes)
 app.use("/Wishlist", wishlistRoutes)
+app.use("/Review", reviewRoutes)
 app.use("/POS",     posRouter)
 
 async function startServer() {
