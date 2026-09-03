@@ -8,7 +8,7 @@ import cloudinary from "../services/cloudinary.js";
 // This computes whether the discount is *live right now*, and the resulting
 // price, using the same percentage/fixed math OrderController already applies
 // at checkout — so what a storefront displays always matches what gets charged.
-function withEffectiveDiscount(product) {
+export function withEffectiveDiscount(product) {
     const d = product.discount;
     const now = new Date();
 
