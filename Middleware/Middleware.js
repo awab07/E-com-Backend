@@ -113,7 +113,16 @@ export const GuestProtection = (req, res, next) => {
             req.user = null;
             return next();
         }
-        return protection(req, res, next);
+        const token = authheader.split(" ")[1];
+        try {
+            req.user = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+        } catch (error) {
+            // Optional auth: an expired/invalid token just means "browse as guest"
+            // here, not a hard failure — the client will refresh it in the
+            // background for routes that actually require a valid session.
+            req.user = null;
+        }
+        return next();
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

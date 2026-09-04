@@ -1,6 +1,13 @@
 import express from "express"
-import { getProductReviews, writeReview, deleteReview, getMyReviews } from "../Controllers/reviewController.js"
-import { protection } from "../Middleware/Middleware.js"
+import {
+    getProductReviews,
+    writeReview,
+    deleteReview,
+    getMyReviews,
+    getPendingReviews,
+    updateReviewStatus
+} from "../Controllers/reviewController.js"
+import { protection, isAdmin, GuestProtection } from "../Middleware/Middleware.js"
 
 const reviewRoutes = express.Router()
 
@@ -22,10 +29,76 @@ reviewRoutes.get('/mine', protection, getMyReviews)
 
 /**
  * @swagger
+ * /Review/admin/pending:
+ *   get:
+ *     summary: Get all reviews awaiting admin approval (Admin only)
+ *     tags: [Reviews (Admin)]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Pending reviews fetched successfully
+ *       401:
+ *         description: Unauthorized or access token expired
+ *       403:
+ *         description: Forbidden (not admin)
+ */
+reviewRoutes.get('/admin/pending', protection, isAdmin, getPendingReviews)
+
+/**
+ * @swagger
+ * /Review/admin/{id}/status:
+ *   put:
+ *     summary: Approve or reject a review (Admin only)
+ *     tags: [Reviews (Admin)]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Review ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - status
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [pending, approved, rejected]
+ *                 example: approved
+ *     responses:
+ *       200:
+ *         description: Review status updated successfully
+ *       400:
+ *         description: Invalid status
+ *       401:
+ *         description: Unauthorized or access token expired
+ *       403:
+ *         description: Forbidden (not admin)
+ *       404:
+ *         description: Review not found
+ */
+reviewRoutes.put('/admin/:id/status', protection, isAdmin, updateReviewStatus)
+
+/**
+ * @swagger
  * /Review/{productId}:
  *   get:
- *     summary: Get all reviews for a product, plus a rating summary
+ *     summary: Get all approved reviews for a product, plus a rating summary
+ *     description: >
+ *       Returns approved reviews visible to everyone. If the caller is logged in
+ *       (bearer token, optional), their own review is also included regardless of
+ *       its status — e.g. "pending" while it awaits admin approval.
  *     tags: [Reviews]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: productId
@@ -41,13 +114,17 @@ reviewRoutes.get('/mine', protection, getMyReviews)
  *       200:
  *         description: Reviews fetched successfully
  */
-reviewRoutes.get('/:productId', getProductReviews)
+reviewRoutes.get('/:productId', GuestProtection, getProductReviews)
 
 /**
  * @swagger
  * /Review/{productId}:
  *   post:
  *     summary: Write or update the logged-in user's review for a product
+ *     description: >
+ *       The review is saved with status "pending" and is only shown publicly once
+ *       an admin approves it. The submitting user can still see their own pending
+ *       review when fetching the product's reviews.
  *     tags: [Reviews]
  *     security:
  *       - bearerAuth: []
@@ -74,7 +151,7 @@ reviewRoutes.get('/:productId', getProductReviews)
  *                 example: Great product, fast pickup.
  *     responses:
  *       200:
- *         description: Review saved successfully
+ *         description: Review saved successfully, pending admin approval
  *       400:
  *         description: Validation error
  *       401:

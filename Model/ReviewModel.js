@@ -26,6 +26,12 @@ const reviewSchema = new mongoose.Schema({
         trim: true,
         maxlength: 1000,
         default: ""
+    },
+
+    status: {
+        type: String,
+        enum: ["pending", "approved", "rejected"],
+        default: "pending"
     }
 
 }, { timestamps: true })
@@ -33,5 +39,6 @@ const reviewSchema = new mongoose.Schema({
 // One review per user per product — writeReview upserts against this.
 reviewSchema.index({ product: 1, user: 1 }, { unique: true });
 reviewSchema.index({ product: 1, createdAt: -1 });
+reviewSchema.index({ status: 1 });
 
 export const Review = mongoose.model("Review", reviewSchema)
