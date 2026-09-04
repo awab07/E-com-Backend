@@ -14,6 +14,10 @@ const userSchema = new mongoose.Schema({
         minlength: 2,
         trim: true
     },
+    gender: {
+        type: String,
+        enum: ["male", "female", "other"]
+    },
     role: {
         type: String,
         enum: ["user", "admin"],
@@ -60,7 +64,7 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
-    
+
     refreshToken: {
         type: String,
         default: null

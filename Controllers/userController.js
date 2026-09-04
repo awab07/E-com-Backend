@@ -5,11 +5,11 @@ import { OTP_gen } from "../utils/OTP_Generator.js";
 import { sendOTPEmail } from "../Mailer/MailSender.js";
 import { generateAccessToken, generateRefreshToken } from "../utils/Tokenization.js";
 
-const safeUserFields = "_id firstname lastname email phno address role isverified isActive createdAt";
+const safeUserFields = "_id firstname lastname email phno address role isverified isActive gender createdAt";
 
 export const registerUser = async (req, res) => {
     try {
-        const { firstname, lastname, email, password, phno } = req.body;
+        const { firstname, lastname, email, password, phno, gender } = req.body;
 
         // Validations
         if (!firstname || !email || !password || !phno)
@@ -26,7 +26,8 @@ export const registerUser = async (req, res) => {
             return res.status(400).json({ message: "Password must contain at least one uppercase letter, one lowercase letter, one number and one special character!" });
         if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/))
             return res.status(400).json({ message: "Invalid Email!" });
-
+        if (gender && !["male", "female", "other"].includes(gender))
+            return res.status(400).json({ message: "Invalid Gender!" });
 
         const otp = OTP_gen();
 
@@ -46,6 +47,7 @@ export const registerUser = async (req, res) => {
                 email,
                 firstname,
                 lastname,
+                gender,
                 password: hashedPassword,
                 phno,
                 otp: hashedOtp,
@@ -119,6 +121,7 @@ export const Loginuser = async (req, res) => {
                 lastname: user.lastname,
                 email: user.email,
                 phno: user.phno,
+                gender: user.gender,
                 address: user.address,
                 role: user.role,
                 isverified: user.isverified,
@@ -193,13 +196,19 @@ export const UpdateUser = async (req, res) => {
     try {
         const userID = req.user.id;
 
-        const { firstname, lastname, password, phno, street, city, province, postalCode, country } = req.body;
+        const { firstname, lastname, password, phno, gender, street, city, province, postalCode, country } = req.body;
 
         const updateFields = {};
 
         if (firstname?.trim()) updateFields.firstname = firstname.trim();
         if (lastname?.trim()) updateFields.lastname = lastname.trim();
         if (phno?.trim()) updateFields.phno = phno.trim();
+
+        if (gender) {
+            if (!["male", "female", "other"].includes(gender))
+                return res.status(400).json({ success: false, message: "Invalid Gender!" });
+            updateFields.gender = gender;
+        }
 
         if (password && password.trim() !== "") {
             if (password.length < 6)
@@ -223,7 +232,7 @@ export const UpdateUser = async (req, res) => {
             userID,
             { $set: updateFields },
             { new: true, runValidators: true }
-        ).select("_id firstname lastname email phno address role").lean();
+        ).select("_id firstname lastname email phno gender address role").lean();
 
         if (!user) return res.status(404).json({ success: false, message: "User Not Found!" });
 
