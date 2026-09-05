@@ -2,6 +2,8 @@ import { Blog } from "../Model/BlogModel.js";
 import getdatauri from "../Middleware/datauriparser.js";
 import cloudinary from "../services/cloudinary.js";
 
+const SITES = ["doubleapple", "triplebuzz", "both"];
+
 function makeExcerpt(content) {
     const plain = content.replace(/\s+/g, " ").trim();
     return plain.length > 180 ? `${plain.slice(0, 180).trim()}...` : plain;
@@ -9,7 +11,7 @@ function makeExcerpt(content) {
 
 export const createBlog = async (req, res) => {
     try {
-        const { title, content, excerpt, category } = req.body;
+        const { title, content, excerpt, category, site } = req.body;
 
         if (!title || !content) {
             return res.status(400).json({
@@ -33,6 +35,7 @@ export const createBlog = async (req, res) => {
             excerpt: excerpt?.trim() || makeExcerpt(content),
             category,
             image,
+            site: SITES.includes(site) ? site : "both",
             author: req.user.id
         });
 
@@ -51,9 +54,12 @@ export const getAllBlogs = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const category = req.query.category || null;
+        const site = req.query.site || null;
 
         const filter = {};
         if (category) filter.category = category;
+        // A post targeted at "both" shows up for either storefront's site filter.
+        if (SITES.includes(site) && site !== "both") filter.site = { $in: [site, "both"] };
         const skip = (page - 1) * limit;
 
         const [blogs, totalItems] = await Promise.all([
@@ -94,7 +100,7 @@ export const getBlogById = async (req, res) => {
 export const updateBlog = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, content, excerpt, category } = req.body;
+        const { title, content, excerpt, category, site } = req.body;
 
         const blog = await Blog.findById(id);
         if (!blog) return res.status(404).json({ success: false, message: "Blog not found!" });
@@ -103,6 +109,7 @@ export const updateBlog = async (req, res) => {
         if (content?.trim()) blog.content = content.trim();
         if (excerpt?.trim()) blog.excerpt = excerpt.trim();
         if (category?.trim()) blog.category = category.trim();
+        if (SITES.includes(site)) blog.site = site;
 
         if (req.file) {
             if (blog.image?.public_id) {

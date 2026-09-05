@@ -31,6 +31,10 @@ const blogRoutes = express.Router()
  *                 type: string
  *               category:
  *                 type: string
+ *               site:
+ *                 type: string
+ *                 enum: [doubleapple, triplebuzz, both]
+ *                 description: Which storefront(s) this post should appear on
  *               image:
  *                 type: string
  *                 format: binary
@@ -65,6 +69,12 @@ blogRoutes.post('/', protection, isAdmin, singleStorage, createBlog)
  *         name: category
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: site
+ *         schema:
+ *           type: string
+ *           enum: [doubleapple, triplebuzz]
+ *         description: Filter to posts targeting one storefront (posts marked "both" always match)
  *     responses:
  *       200:
  *         description: Blogs fetched successfully
@@ -119,6 +129,9 @@ blogRoutes.get('/:id', getBlogById)
  *                 type: string
  *               category:
  *                 type: string
+ *               site:
+ *                 type: string
+ *                 enum: [doubleapple, triplebuzz, both]
  *               image:
  *                 type: string
  *                 format: binary

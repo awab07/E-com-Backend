@@ -35,6 +35,13 @@ reviewRoutes.get('/mine', protection, getMyReviews)
  *     tags: [Reviews (Admin)]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: site
+ *         schema:
+ *           type: string
+ *           enum: [doubleapple, triplebuzz]
+ *         description: Filter to reviews submitted from one storefront
  *     responses:
  *       200:
  *         description: Pending reviews fetched successfully
@@ -149,6 +156,10 @@ reviewRoutes.get('/:productId', GuestProtection, getProductReviews)
  *               comment:
  *                 type: string
  *                 example: Great product, fast pickup.
+ *               site:
+ *                 type: string
+ *                 enum: [doubleapple, triplebuzz]
+ *                 description: Which storefront this review was submitted from
  *     responses:
  *       200:
  *         description: Review saved successfully, pending admin approval

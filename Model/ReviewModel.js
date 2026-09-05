@@ -32,6 +32,14 @@ const reviewSchema = new mongoose.Schema({
         type: String,
         enum: ["pending", "approved", "rejected"],
         default: "pending"
+    },
+
+    // Which storefront the review was submitted from — both Double Apple and
+    // Triple Buzz share this backend, so moderation needs to tell them apart.
+    site: {
+        type: String,
+        enum: ["doubleapple", "triplebuzz"],
+        default: "doubleapple"
     }
 
 }, { timestamps: true })
@@ -40,5 +48,6 @@ const reviewSchema = new mongoose.Schema({
 reviewSchema.index({ product: 1, user: 1 }, { unique: true });
 reviewSchema.index({ product: 1, createdAt: -1 });
 reviewSchema.index({ status: 1 });
+reviewSchema.index({ site: 1 });
 
 export const Review = mongoose.model("Review", reviewSchema)

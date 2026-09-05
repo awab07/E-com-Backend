@@ -1,6 +1,8 @@
 import { Review } from "../Model/ReviewModel.js";
 import { Product } from "../Model/productModel.js";
 
+const SITES = ["doubleapple", "triplebuzz"];
+
 // Reviews created before the approval system shipped have no `status` field —
 // treat those as already-approved instead of hiding them retroactively.
 function isPubliclyVisible(review) {
@@ -50,7 +52,7 @@ export const getProductReviews = async (req, res) => {
 export const writeReview = async (req, res) => {
     try {
         const { productId } = req.params;
-        const { rating, comment } = req.body;
+        const { rating, comment, site } = req.body;
 
         const ratingNum = Number(rating);
         if (!ratingNum || ratingNum < 1 || ratingNum > 5) {
@@ -60,11 +62,16 @@ export const writeReview = async (req, res) => {
         const product = await Product.findById(productId).lean();
         if (!product) return res.status(404).json({ success: false, message: "Product not found." });
 
+        // The submitting storefront tells us which site this review belongs to
+        // (both Double Apple and Triple Buzz write to this same backend). Falls
+        // back to Double Apple for older clients that don't send it yet.
+        const resolvedSite = SITES.includes(site) ? site : "doubleapple";
+
         // Any new review, or an edit to an existing one, goes back to "pending" —
         // an admin has to approve the (possibly changed) content before it's public.
         const review = await Review.findOneAndUpdate(
             { product: productId, user: req.user.id },
-            { rating: ratingNum, comment: comment?.trim() || "", status: "pending" },
+            { rating: ratingNum, comment: comment?.trim() || "", status: "pending", site: resolvedSite },
             { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
         ).populate("user", "firstname lastname");
 
@@ -107,7 +114,11 @@ export const getMyReviews = async (req, res) => {
 
 export const getPendingReviews = async (req, res) => {
     try {
-        const reviews = await Review.find({ status: "pending" })
+        const { site } = req.query;
+        const filter = { status: "pending" };
+        if (SITES.includes(site)) filter.site = site;
+
+        const reviews = await Review.find(filter)
             .sort({ createdAt: -1 })
             .populate("user", "firstname lastname email")
             .populate("product", "name category")
