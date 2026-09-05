@@ -116,7 +116,12 @@ export const getPendingReviews = async (req, res) => {
     try {
         const { site } = req.query;
         const filter = { status: "pending" };
-        if (SITES.includes(site)) filter.site = site;
+        // `null` in $in also matches reviews with no `site` field — ones written
+        // before this field existed default to Double Apple rather than vanishing
+        // from every site's moderation queue.
+        if (SITES.includes(site)) {
+            filter.site = site === "doubleapple" ? { $in: ["doubleapple", null] } : site;
+        }
 
         const reviews = await Review.find(filter)
             .sort({ createdAt: -1 })
