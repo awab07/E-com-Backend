@@ -48,6 +48,10 @@ const userSchema = new mongoose.Schema({
         postalCode: String,
         country: String
     },
+    avatar: {
+        url: { type: String },
+        public_id: { type: String }
+    },
     isverified: {
         type: Boolean,
         default: false

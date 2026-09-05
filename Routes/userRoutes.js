@@ -5,13 +5,16 @@ import {
     getuserbyid,
     Loginuser,
     registerUser,
+    removeAvatar,
     reverify,
     UpdateUser,
+    uploadAvatar,
     verifyOTP,
-    refreshToken,  
-    logout         
+    refreshToken,
+    logout
 } from "../Controllers/userController.js";
-import { isAdmin, protection, refreshTokenMiddleware } from "../Middleware/Middleware.js"; 
+import { isAdmin, protection, refreshTokenMiddleware } from "../Middleware/Middleware.js";
+import { singleStorage } from "../Middleware/multer.js";
 
 const userRoutes = express.Router()
 
@@ -182,6 +185,54 @@ userRoutes.post("/logout", logout)
  *         description: Unauthorized or access token expired
  */
 userRoutes.put("/update", protection, UpdateUser);
+
+/**
+ * @swagger
+ * /Api/avatar:
+ *   post:
+ *     summary: Upload or replace the logged-in user's profile picture
+ *     tags: [User Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - image
+ *             properties:
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Profile picture updated successfully
+ *       400:
+ *         description: No image file provided
+ *       401:
+ *         description: Unauthorized or access token expired
+ */
+userRoutes.post("/avatar", protection, singleStorage, uploadAvatar);
+
+/**
+ * @swagger
+ * /Api/avatar:
+ *   delete:
+ *     summary: Remove the logged-in user's profile picture
+ *     tags: [User Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Profile picture removed
+ *       401:
+ *         description: Unauthorized or access token expired
+ *       404:
+ *         description: User not found
+ */
+userRoutes.delete("/avatar", protection, removeAvatar);
 
 /**
  * @swagger
