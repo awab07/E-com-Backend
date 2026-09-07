@@ -58,6 +58,15 @@ const productSchema = new mongoose.Schema({
     },
     brand: {
         type: String
+    },
+
+    // Which storefront(s) this product should appear on — Double Apple and
+    // Triple Buzz share this backend/catalogue but a product can be scoped to
+    // just one of them (or both, the default).
+    site: {
+        type: String,
+        enum: ["doubleapple", "triplebuzz", "both"],
+        default: "both"
     }
 
 }, { timestamps: true })
@@ -78,4 +87,6 @@ productSchema.index({
     description: "text",
     brand: "text"
 });
+
+productSchema.index({ site: 1 });
 export const Product = mongoose.model("Product", productSchema)
