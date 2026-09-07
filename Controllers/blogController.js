@@ -58,8 +58,14 @@ export const getAllBlogs = async (req, res) => {
 
         const filter = {};
         if (category) filter.category = category;
-        // A post targeted at "both" shows up for either storefront's site filter.
-        if (SITES.includes(site) && site !== "both") filter.site = { $in: [site, "both"] };
+        if (SITES.includes(site) && site !== "both") {
+            // A post targeted at "both" shows up for either storefront's site filter.
+            // Posts written before this field existed have no `site` at all — they
+            // predate Triple Buzz entirely, so treat them as Double Apple-only
+            // rather than surfacing old Double Apple content on the new site.
+            const matches = site === "doubleapple" ? [site, "both", null] : [site, "both"];
+            filter.site = { $in: matches };
+        }
         const skip = (page - 1) * limit;
 
         const [blogs, totalItems] = await Promise.all([

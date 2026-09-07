@@ -43,6 +43,10 @@ const productRoutes = express.Router()
  *               category:
  *                 type: string
  *                 example: mobile
+ *               site:
+ *                 type: string
+ *                 enum: [doubleapple, triplebuzz, both]
+ *                 description: Which storefront(s) this product should appear on (defaults to "both")
  *               images:
  *                 type: array
  *                 items:
@@ -110,6 +114,13 @@ productRoutes.post('/createProduct', multiStorage, protection, isAdmin, ProductC
  *         required: false
  *         description: Search products by name
  *         example: iPhone
+ *       - in: query
+ *         name: site
+ *         schema:
+ *           type: string
+ *           enum: [doubleapple, triplebuzz]
+ *         required: false
+ *         description: Filter to products targeting one storefront (products marked "both" always match)
  *     responses:
  *       200:
  *         description: Products fetched successfully
@@ -166,6 +177,10 @@ productRoutes.post('/createProduct', multiStorage, protection, isAdmin, ProductC
  *                       brand:
  *                         type: string
  *                         example: Apple
+ *                       site:
+ *                         type: string
+ *                         enum: [doubleapple, triplebuzz, both]
+ *                         example: both
  *                       image:
  *                         type: array
  *                         items:
@@ -275,6 +290,9 @@ productRoutes.get("/allproducts", getAllProducts)
  *                 type: number
  *               category:
  *                 type: string
+ *               site:
+ *                 type: string
+ *                 enum: [doubleapple, triplebuzz, both]
  *               images:
  *                 type: array
  *                 items:

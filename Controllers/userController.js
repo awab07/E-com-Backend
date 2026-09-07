@@ -4,8 +4,10 @@ import bcrypt from "bcrypt";
 import { OTP_gen } from "../utils/OTP_Generator.js";
 import { sendOTPEmail } from "../Mailer/MailSender.js";
 import { generateAccessToken, generateRefreshToken } from "../utils/Tokenization.js";
+import getdatauri from "../Middleware/datauriparser.js";
+import cloudinary from "../services/cloudinary.js";
 
-const safeUserFields = "_id firstname lastname email phno address role isverified isActive gender createdAt";
+const safeUserFields = "_id firstname lastname email phno address role isverified isActive gender avatar createdAt";
 
 export const registerUser = async (req, res) => {
     try {
@@ -123,6 +125,7 @@ export const Loginuser = async (req, res) => {
                 phno: user.phno,
                 gender: user.gender,
                 address: user.address,
+                avatar: user.avatar,
                 role: user.role,
                 isverified: user.isverified,
                 isActive: user.isActive
@@ -232,7 +235,7 @@ export const UpdateUser = async (req, res) => {
             userID,
             { $set: updateFields },
             { new: true, runValidators: true }
-        ).select("_id firstname lastname email phno gender address role").lean();
+        ).select("_id firstname lastname email phno gender address avatar role").lean();
 
         if (!user) return res.status(404).json({ success: false, message: "User Not Found!" });
 
@@ -242,6 +245,55 @@ export const UpdateUser = async (req, res) => {
             user
         });
 
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const uploadAvatar = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No image file provided!" });
+        }
+
+        const user = await User.findById(req.user.id);
+        if (!user) return res.status(404).json({ success: false, message: "User Not Found!" });
+
+        if (user.avatar?.public_id) {
+            await cloudinary.uploader.destroy(user.avatar.public_id, { invalidate: true });
+        }
+
+        const fileuri = getdatauri(req.file);
+        const cloud_res = await cloudinary.uploader.upload(fileuri, {
+            folder: "user_avatars"
+        });
+
+        user.avatar = { url: cloud_res.secure_url, public_id: cloud_res.public_id };
+        await user.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "Profile picture updated successfully!",
+            avatar: user.avatar
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const removeAvatar = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+        if (!user) return res.status(404).json({ success: false, message: "User Not Found!" });
+
+        if (user.avatar?.public_id) {
+            await cloudinary.uploader.destroy(user.avatar.public_id, { invalidate: true });
+        }
+
+        user.avatar = undefined;
+        await user.save();
+
+        return res.status(200).json({ success: true, message: "Profile picture removed." });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
