@@ -1,5 +1,5 @@
 import express from "express"
-import { getAllOrderForAdmin, getArchiedOrders, getOrderById, getOrders, getStatsStore, ordercancelforuser, OrderCreator, orderdeletionforAdmin, UpdateOrderStatus } from "../Controllers/OrderController.js"
+import { getAllOrderForAdmin, getArchiedOrders, getOrderById, getOrders, getStatsStore, ordercancelforuser, OrderCreator, orderdeletionforAdmin, UpdateOrderStatus, initiatePaypalOrder, confirmPaypalOrder, chargeAuthorizeNetOrder, authorizeNetWebhook } from "../Controllers/OrderController.js"
 import { GuestProtection, isAdmin, isUser, protection } from "../Middleware/Middleware.js"
 import { Admin } from "mongodb"
 const orderrouter = express.Router()
@@ -52,6 +52,130 @@ const orderrouter = express.Router()
  *         description: Product not found
  */
 orderrouter.post("/create", GuestProtection, OrderCreator)
+
+/**
+ * @swagger
+ * /Order/paypal/create:
+ *   post:
+ *     tags:
+ *       - Orders
+ *     summary: Validate cart, reserve stock, and open a matching PayPal order
+ *     description: >
+ *       Creates a "pending" Order in the database and a matching PayPal order.
+ *       Returns paypalOrderId for the frontend PayPal buttons to approve.
+ *       Call /Order/paypal/capture/{paypalOrderId} after buyer approval.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - items
+ *               - shippingAddress
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 example:
+ *                   - productId: "64f1c2a1b2c3d4e5f6789012"
+ *                     quantity: 2
+ *               shippingAddress:
+ *                 type: object
+ *     responses:
+ *       201:
+ *         description: PayPal order created
+ *       400:
+ *         description: Validation error
+ *       404:
+ *         description: Product not found
+ */
+orderrouter.post("/paypal/create", GuestProtection, initiatePaypalOrder)
+
+/**
+ * @swagger
+ * /Order/paypal/capture/{paypalOrderId}:
+ *   post:
+ *     tags:
+ *       - Orders
+ *     summary: Capture a PayPal payment after buyer approval
+ *     parameters:
+ *       - in: path
+ *         name: paypalOrderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Payment captured, order marked paid
+ *       402:
+ *         description: Payment was not completed
+ *       404:
+ *         description: Order not found
+ */
+orderrouter.post("/paypal/capture/:paypalOrderId", confirmPaypalOrder)
+
+/**
+ * @swagger
+ * /Order/authorizenet/charge:
+ *   post:
+ *     tags:
+ *       - Orders
+ *     summary: Charge a card via Authorize.Net (Accept.js opaque data) and create the order
+ *     description: >
+ *       The frontend must first tokenize the card with Authorize.Net's Accept.js
+ *       and send the resulting opaqueData ({dataDescriptor, dataValue}) here.
+ *       Raw card numbers should never be sent to this endpoint.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - items
+ *               - shippingAddress
+ *               - opaqueData
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 example:
+ *                   - productId: "64f1c2a1b2c3d4e5f6789012"
+ *                     quantity: 2
+ *               shippingAddress:
+ *                 type: object
+ *               opaqueData:
+ *                 type: object
+ *                 properties:
+ *                   dataDescriptor:
+ *                     type: string
+ *                   dataValue:
+ *                     type: string
+ *     responses:
+ *       201:
+ *         description: Payment charged and order created
+ *       400:
+ *         description: Validation error
+ *       402:
+ *         description: Payment declined
+ *       404:
+ *         description: Product not found
+ */
+orderrouter.post("/authorizenet/charge", GuestProtection, chargeAuthorizeNetOrder)
+
+/**
+ * @swagger
+ * /Order/authorizenet/webhook:
+ *   post:
+ *     tags:
+ *       - Orders
+ *     summary: Authorize.Net webhook receiver (signature-verified)
+ *     responses:
+ *       200:
+ *         description: Event accepted
+ *       401:
+ *         description: Invalid signature
+ */
+orderrouter.post("/authorizenet/webhook", authorizeNetWebhook)
 /**
  * @swagger
  * /Order:

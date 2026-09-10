@@ -29,6 +29,7 @@ app.use(cors({
     origin: [
         "http://localhost:5173",
         "https://double-apple.vercel.app",
+        "https://triple-buzz.vercel.app",
         process.env.FRONTEND_URL
     ].filter(Boolean),
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -36,7 +37,11 @@ app.use(cors({
     credentials: true
 }))
 
-app.use(express.json())
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = buf;
+    }
+}))
 
 app.use((req, res, next) => {
     const start = performance.now();
