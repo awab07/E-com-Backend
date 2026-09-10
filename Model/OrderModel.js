@@ -102,7 +102,9 @@ const orderSchema = new mongoose.Schema(
                 "Cash On Delivery",
                 "Stripe",
                 "JazzCash",
-                "EasyPaisa"
+                "EasyPaisa",
+                "PayPal",
+                "Authorize.Net"
             ],
             default: "Cash On Delivery"
         },
@@ -115,6 +117,21 @@ const orderSchema = new mongoose.Schema(
                 "failed"
             ],
             default: "pending"
+        },
+
+        paymentDetails: {
+            paypalOrderId: {
+                type: String,
+                default: null
+            },
+            paypalCaptureId: {
+                type: String,
+                default: null
+            },
+            authorizeNetTransactionId: {
+                type: String,
+                default: null
+            }
         },
 
         status: {
@@ -150,5 +167,6 @@ orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ isArchived: 1, createdAt: -1 });
 orderSchema.index({ status: 1 });
 orderSchema.index({ deliveredAt: 1 });
+orderSchema.index({ "paymentDetails.paypalOrderId": 1 });
 
 export const Order = mongoose.model("Order", orderSchema);

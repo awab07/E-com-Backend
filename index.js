@@ -37,7 +37,11 @@ app.use(cors({
     credentials: true
 }))
 
-app.use(express.json())
+app.use(express.json({
+    verify: (req, res, buf) => {
+        req.rawBody = buf;
+    }
+}))
 
 app.use((req, res, next) => {
     const start = performance.now();
