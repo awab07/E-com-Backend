@@ -8,6 +8,20 @@ import {
 } from "../services/posService.js";
 import { Product } from "../Model/productModel.js";
 
+const POS_SITES = ["triplebuzz", "doubleapple"];
+
+// Every POS endpoint acts on exactly one storefront's Lightspeed account —
+// resolved once here so a typo'd/missing site fails loudly instead of
+// silently falling through to the wrong store's data.
+const resolveSite = (req, res) => {
+    const site = req.query.site || "triplebuzz";
+    if (!POS_SITES.includes(site)) {
+        res.status(400).json({ success: false, message: `site must be one of: ${POS_SITES.join(", ")}` });
+        return null;
+    }
+    return site;
+};
+
 const handlePOSError = (res, error) => {
     const status = error.response?.status || 500;
     return res.status(status).json({
@@ -18,9 +32,12 @@ const handlePOSError = (res, error) => {
 
 export const fetchPOSProducts = async (req, res) => {
     try {
+        const site = resolveSite(req, res);
+        if (!site) return;
+
         const { after, before, page_size, sku, name, deleted, include_images } = req.query;
 
-        const { data, nextCursor } = await getPOSProducts({
+        const { data, nextCursor } = await getPOSProducts(site, {
             page_size: Math.min(parseInt(page_size) || 250, 250),
             after:  after  !== undefined ? Number(after)  : undefined,
             before: before !== undefined ? Number(before) : undefined,
@@ -38,8 +55,11 @@ export const fetchPOSProducts = async (req, res) => {
 
 export const fetchPOSProductById = async (req, res) => {
     try {
+        const site = resolveSite(req, res);
+        if (!site) return;
+
         const { id } = req.params;
-        const product = await getPOSProductById(id);
+        const product = await getPOSProductById(site, id);
         return res.status(200).json({ success: true, product });
     } catch (error) {
         return handlePOSError(res, error);
@@ -48,8 +68,11 @@ export const fetchPOSProductById = async (req, res) => {
 
 export const fetchPOSCategories = async (req, res) => {
     try {
+        const site = resolveSite(req, res);
+        if (!site) return;
+
         const { after, page_size } = req.query;
-        const { data, nextCursor } = await getPOSCategories({
+        const { data, nextCursor } = await getPOSCategories(site, {
             page_size: Math.min(parseInt(page_size) || 250, 250),
             after
         });
@@ -61,8 +84,11 @@ export const fetchPOSCategories = async (req, res) => {
 
 export const fetchPOSInventory = async (req, res) => {
     try {
+        const site = resolveSite(req, res);
+        if (!site) return;
+
         const { offset, size } = req.query;
-        const { data, nextOffset } = await getPOSInventoryLevels({
+        const { data, nextOffset } = await getPOSInventoryLevels(site, {
             offset: parseInt(offset) || 0,
             size: Math.min(parseInt(size) || 250, 250)
         });
@@ -72,9 +98,9 @@ export const fetchPOSInventory = async (req, res) => {
     }
 };
 
-// Maps a Lightspeed product into this backend's Product shape. Always tagged
-// site: "triplebuzz" since that's the only storefront this POS feeds.
-const mapLightspeedProduct = (posProduct, stockMap) => {
+// Maps a Lightspeed product into this backend's Product shape, tagged for
+// whichever storefront's own POS account it was pulled from.
+const mapLightspeedProduct = (posProduct, stockMap, site) => {
     const category = posProduct.product_category?.name?.trim();
     const images = (posProduct.images || [])
         .filter((img) => img?.url)
@@ -89,7 +115,7 @@ const mapLightspeedProduct = (posProduct, stockMap) => {
         category: category || "Uncategorized",
         brand: posProduct.brand?.name || undefined,
         image: images,
-        site: "triplebuzz",
+        site,
         posSyncedAt: new Date()
     };
 };
@@ -97,17 +123,22 @@ const mapLightspeedProduct = (posProduct, stockMap) => {
 // A single sync of ~5,000+ products can't reliably finish inside one
 // serverless invocation, so this is self-resuming: it works a time-boxed
 // slice of pages, then hands back the cursor it stopped at. Call it again
-// with ?after=<resumeAfter> until the response says done:true. Upserts are
-// keyed on posId, so calling it repeatedly (including from the start) is
-// always safe — it never creates duplicates.
+// with ?site=<site>&after=<resumeAfter> until the response says done:true.
+// Upserts are keyed on posId, so calling it repeatedly (including from the
+// start) is always safe — it never creates duplicates. Each site's posId
+// values come from that site's own Lightspeed account, so a triplebuzz sync
+// and a doubleapple sync can never collide with or overwrite each other.
 const SYNC_TIME_BUDGET_MS = 45000;
 
 export const syncPOSProducts = async (req, res) => {
+    const site = resolveSite(req, res);
+    if (!site) return;
+
     const startedAt = Date.now();
     const shouldStop = () => Date.now() - startedAt > SYNC_TIME_BUDGET_MS;
 
     try {
-        const inventoryMap = await fetchPOSInventoryMap();
+        const inventoryMap = await fetchPOSInventoryMap(site);
 
         let created = 0;
         let updated = 0;
@@ -115,7 +146,7 @@ export const syncPOSProducts = async (req, res) => {
         let skippedInactive = 0;
         const categoriesSeen = new Set();
 
-        const { done, cursor } = await streamAllPOSProducts({
+        const { done, cursor } = await streamAllPOSProducts(site, {
             after: req.query.after !== undefined ? Number(req.query.after) : undefined,
             shouldStop,
             onPage: async (posProducts) => {
@@ -124,7 +155,7 @@ export const syncPOSProducts = async (req, res) => {
                 skippedInactive += posProducts.length - sellable.length;
                 if (sellable.length === 0) return;
 
-                const docs = sellable.map((p) => mapLightspeedProduct(p, inventoryMap));
+                const docs = sellable.map((p) => mapLightspeedProduct(p, inventoryMap, site));
                 docs.forEach((d) => categoriesSeen.add(d.category));
 
                 const result = await Product.bulkWrite(
@@ -146,6 +177,7 @@ export const syncPOSProducts = async (req, res) => {
 
         return res.status(200).json({
             success: true,
+            site,
             done,
             resumeAfter: done ? null : cursor,
             processed,
@@ -154,8 +186,8 @@ export const syncPOSProducts = async (req, res) => {
             skippedInactive,
             categoriesTouched: [...categoriesSeen],
             message: done
-                ? "Sync complete — every active Lightspeed product has been mirrored."
-                : `Time budget reached. Call POST /POS/sync/products?after=${cursor} to continue.`
+                ? `Sync complete — every active ${site} Lightspeed product has been mirrored.`
+                : `Time budget reached. Call POST /POS/sync/products?site=${site}&after=${cursor} to continue.`
         });
     } catch (error) {
         return handlePOSError(res, error);

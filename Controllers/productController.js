@@ -1,9 +1,48 @@
 // Controllers/productController.js
 import { Product } from "../Model/productModel.js";
+import { Review } from "../Model/ReviewModel.js";
+import { Order } from "../Model/OrderModel.js";
 import getdatauri from "../Middleware/datauriparser.js";
 import cloudinary from "../services/cloudinary.js";
 
 const SITES = ["doubleapple", "triplebuzz", "both"];
+
+// Real rating/review-count/units-sold per product, computed in two grouped
+// aggregations (not one query per card) so a grid of dozens of products
+// costs 2 queries total instead of an N+1 fan-out. Reviews only count
+// publicly-visible ones (approved, or legacy reviews with no status field —
+// same rule reviewController.js uses); "sold" sums order-item quantities
+// from any non-cancelled order.
+async function attachSalesAndRatingStats(products) {
+    const ids = products.map((p) => p._id);
+    if (ids.length === 0) return products;
+
+    const [ratingRows, soldRows] = await Promise.all([
+        Review.aggregate([
+            { $match: { product: { $in: ids }, $or: [{ status: "approved" }, { status: { $exists: false } }] } },
+            { $group: { _id: "$product", avg: { $avg: "$rating" }, count: { $sum: 1 } } }
+        ]),
+        Order.aggregate([
+            { $match: { "items.product": { $in: ids }, status: { $ne: "cancelled" } } },
+            { $unwind: "$items" },
+            { $match: { "items.product": { $in: ids } } },
+            { $group: { _id: "$items.product", sold: { $sum: "$items.quantity" } } }
+        ])
+    ]);
+
+    const ratingById = new Map(ratingRows.map((r) => [String(r._id), r]));
+    const soldById = new Map(soldRows.map((r) => [String(r._id), r.sold]));
+
+    return products.map((p) => {
+        const rating = ratingById.get(String(p._id));
+        return {
+            ...p,
+            rating: rating ? Math.round(rating.avg * 10) / 10 : 0,
+            reviewCount: rating?.count || 0,
+            sold: soldById.get(String(p._id)) || 0
+        };
+    });
+}
 
 // A product's stored discount.isActive is just the admin's on/off toggle — it
 // says nothing about whether today actually falls inside startDate/endDate.
@@ -160,13 +199,15 @@ export const getAllProducts = async (req, res) => {
         console.log("DB TIME:", dbTime.toFixed(2), "ms");
         console.log("TOTAL TIME:", (performance.now() - start).toFixed(2), "ms");
 
+        const withStats = await attachSalesAndRatingStats(products);
+
         return res.status(200).json({
             success: true,
             message: "Products Fetched Successfully",
             currentPage: page,
             totalItems,
             itemsPerPage: limit,
-            products: products.map((p) => withEffectiveDiscount({ ...p, site: p.site ?? "both" }))
+            products: withStats.map((p) => withEffectiveDiscount({ ...p, site: p.site ?? "both" }))
         });
     } catch (error) {
         return res.status(500).json({ message: error.message })
@@ -290,7 +331,8 @@ export const FindProductById = async (req, res) => {
         const { id } = req.params;
         const product = await Product.findById(id).lean()
         if (!product) return res.status(404).json({ success: false, message: "Product Not Found!" })
-        return res.status(200).json({ success: true, message: "Product Fetched Successfully!", product: withEffectiveDiscount({ ...product, site: product.site ?? "both" }) })
+        const [withStats] = await attachSalesAndRatingStats([product]);
+        return res.status(200).json({ success: true, message: "Product Fetched Successfully!", product: withEffectiveDiscount({ ...withStats, site: withStats.site ?? "both" }) })
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message })
     }
