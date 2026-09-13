@@ -44,9 +44,12 @@ const productSchema = new mongoose.Schema({
                 type: String,
                 required: true
             },
+            // Only present for admin-uploaded images (the Cloudinary asset id,
+            // needed to delete them later). POS-synced products hot-link the
+            // Lightspeed CDN directly and have no Cloudinary asset, so this is
+            // optional rather than required.
             public_id: {
-                type: String,
-                required: true
+                type: String
             }
         }
     ],
@@ -67,7 +70,18 @@ const productSchema = new mongoose.Schema({
         type: String,
         enum: ["doubleapple", "triplebuzz", "both"],
         default: "both"
-    }
+    },
+
+    // Set only for products synced in from a POS (Lightspeed) catalogue —
+    // the POS's own product id, used as the upsert key on every re-sync so
+    // running it again updates the same record instead of duplicating it.
+    posId: {
+        type: String,
+        unique: true,
+        sparse: true,
+        index: true
+    },
+    posSyncedAt: Date
 
 }, { timestamps: true })
 
