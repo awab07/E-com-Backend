@@ -26,8 +26,14 @@ dns.setServers(["1.1.1.1", "8.8.8.8"])
 const app = express()
 
 app.use(cors({
+    // Double Apple and Triple Buzz both default to Vite's port 5173, so
+    // whichever one starts second gets auto-bumped to 5174 (or higher) —
+    // whitelist a small local range so running both at once never breaks on
+    // CORS depending on which one happened to grab 5173 first.
     origin: [
         "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
         "https://double-apple.vercel.app",
         "https://triple-buzz.vercel.app",
         process.env.FRONTEND_URL
