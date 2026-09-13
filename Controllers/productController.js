@@ -152,7 +152,8 @@ export const getAllProducts = async (req, res) => {
         const skip = (page - 1) * limit;
         const dbStart = performance.now();
         const [products, totalItems] = await Promise.all([
-            Product.find(filter).skip(skip).limit(limit).lean()
+            Product.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+            Product.countDocuments(filter)
         ]);
         const dbTime = performance.now() - dbStart;
 
@@ -271,7 +272,9 @@ export const ProductDeleter = async (req, res) => {
 
         if (product.image && product.image.length > 0) {
             for (const image of product.image) {
-                await cloudinary.uploader.destroy(image.public_id)
+                // POS-synced images have no Cloudinary asset (no public_id) —
+                // nothing to destroy there, just skip.
+                if (image.public_id) await cloudinary.uploader.destroy(image.public_id)
             }
         }
 
