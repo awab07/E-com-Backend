@@ -7,8 +7,15 @@ import {
     streamAllPOSProducts
 } from "../services/posService.js";
 import { Product } from "../Model/productModel.js";
+import { PosSettings } from "../Model/posSettingsModel.js";
+import { PosSyncRun } from "../Model/posSyncRunModel.js";
 
 const POS_SITES = ["triplebuzz", "doubleapple"];
+
+const POS_ACCOUNT_ENV = {
+    triplebuzz: { domain: "LIGHTSPEED_DOMAIN", token: "LIGHTSPEED_ACCESS_TOKEN" },
+    doubleapple: { domain: "LIGHTSPEED_DOMAIN_DOUBLEAPPLE", token: "LIGHTSPEED_ACCESS_TOKEN_DOUBLEAPPLE" }
+};
 
 // Every POS endpoint acts on exactly one storefront's Lightspeed account —
 // resolved once here so a typo'd/missing site fails loudly instead of
@@ -28,6 +35,13 @@ const handlePOSError = (res, error) => {
         success: false,
         message: error.response?.data?.message || error.message
     });
+};
+
+// Defaults to enabled — a site with no settings doc yet has never been
+// disabled, so it should behave exactly as it did before this switch existed.
+const isSiteEnabled = async (site) => {
+    const settings = await PosSettings.findOne({ site }).lean();
+    return settings?.enabled !== false;
 };
 
 export const fetchPOSProducts = async (req, res) => {
@@ -98,6 +112,110 @@ export const fetchPOSInventory = async (req, res) => {
     }
 };
 
+// ---- Connection status, kill switch, run history — power the admin portal ----
+
+export const getPOSStatus = async (req, res) => {
+    try {
+        const site = resolveSite(req, res);
+        if (!site) return;
+
+        const account = POS_ACCOUNT_ENV[site];
+        const domain = process.env[account.domain];
+        const connected = Boolean(domain && process.env[account.token]);
+
+        const [enabled, totalProducts, latestSynced, latestRun] = await Promise.all([
+            isSiteEnabled(site),
+            Product.countDocuments({ site, posId: { $exists: true } }),
+            Product.findOne({ site, posId: { $exists: true } }).sort({ posSyncedAt: -1 }).select("posSyncedAt").lean(),
+            PosSyncRun.findOne({ site }).sort({ startedAt: -1 }).lean()
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            status: {
+                site,
+                connected,
+                enabled,
+                accountName: domain ? `${domain}.retail.lightspeed.app` : "Not configured",
+                totalProducts,
+                lastSyncAt: latestSynced?.posSyncedAt ?? null,
+                lastRun: latestRun ?? null,
+                direction: "inbound",
+                scopes: ["read:products", "read:product_categories", "read:inventory"]
+            }
+        });
+    } catch (error) {
+        return handlePOSError(res, error);
+    }
+};
+
+export const getPOSSettings = async (req, res) => {
+    try {
+        const site = resolveSite(req, res);
+        if (!site) return;
+
+        const settings = await PosSettings.findOne({ site }).lean();
+        return res.status(200).json({
+            success: true,
+            settings: {
+                site,
+                enabled: settings?.enabled !== false,
+                disabledAt: settings?.disabledAt ?? null,
+                disabledBy: settings?.disabledBy ?? null
+            }
+        });
+    } catch (error) {
+        return handlePOSError(res, error);
+    }
+};
+
+export const updatePOSSettings = async (req, res) => {
+    try {
+        const site = resolveSite(req, res);
+        if (!site) return;
+
+        const { enabled } = req.body;
+        if (typeof enabled !== "boolean") {
+            return res.status(400).json({ success: false, message: "enabled must be a boolean" });
+        }
+
+        const update = {
+            enabled,
+            disabledAt: enabled ? null : new Date(),
+            disabledBy: enabled ? null : (req.user?.name || req.user?.id || "admin")
+        };
+
+        const settings = await PosSettings.findOneAndUpdate(
+            { site },
+            { $set: update },
+            { new: true, upsert: true, setDefaultsOnInsert: true }
+        ).lean();
+
+        return res.status(200).json({
+            success: true,
+            message: enabled
+                ? `POS sync re-enabled for ${site}.`
+                : `POS sync temporarily disabled for ${site} — the next sync call will refuse to run until this is switched back on.`,
+            settings
+        });
+    } catch (error) {
+        return handlePOSError(res, error);
+    }
+};
+
+export const getPOSSyncRuns = async (req, res) => {
+    try {
+        const site = resolveSite(req, res);
+        if (!site) return;
+
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+        const runs = await PosSyncRun.find({ site }).sort({ startedAt: -1 }).limit(limit).lean();
+        return res.status(200).json({ success: true, runs });
+    } catch (error) {
+        return handlePOSError(res, error);
+    }
+};
+
 // Maps a Lightspeed product into this backend's Product shape, tagged for
 // whichever storefront's own POS account it was pulled from.
 const mapLightspeedProduct = (posProduct, stockMap, site) => {
@@ -134,8 +252,25 @@ export const syncPOSProducts = async (req, res) => {
     const site = resolveSite(req, res);
     if (!site) return;
 
-    const startedAt = Date.now();
-    const shouldStop = () => Date.now() - startedAt > SYNC_TIME_BUDGET_MS;
+    const startedAt = new Date();
+
+    // The kill switch: an admin flipped this site off from the portal, so
+    // refuse to talk to that Lightspeed account until it's switched back on.
+    // Logged as its own run so the portal's history shows *why* nothing
+    // happened, instead of the run silently not appearing at all.
+    if (!(await isSiteEnabled(site))) {
+        await PosSyncRun.create({
+            site, startedAt, finishedAt: new Date(), durationMs: 0,
+            status: "skipped", done: false,
+            message: `Sync skipped — POS sync is temporarily disabled for ${site}.`
+        });
+        return res.status(423).json({
+            success: false,
+            message: `POS sync is temporarily disabled for ${site}. Re-enable it from the POS integration settings to sync again.`
+        });
+    }
+
+    const shouldStop = () => Date.now() - startedAt.getTime() > SYNC_TIME_BUDGET_MS;
 
     try {
         const inventoryMap = await fetchPOSInventoryMap(site);
@@ -175,6 +310,15 @@ export const syncPOSProducts = async (req, res) => {
             }
         });
 
+        const finishedAt = new Date();
+        await PosSyncRun.create({
+            site, startedAt, finishedAt, durationMs: finishedAt - startedAt,
+            status: done ? "success" : "partial",
+            done, resumeAfter: done ? null : cursor,
+            processed, created, updated, skippedInactive,
+            message: done ? null : `Time budget reached — ${cursor} more to resume from.`
+        });
+
         return res.status(200).json({
             success: true,
             site,
@@ -190,6 +334,12 @@ export const syncPOSProducts = async (req, res) => {
                 : `Time budget reached. Call POST /POS/sync/products?site=${site}&after=${cursor} to continue.`
         });
     } catch (error) {
+        const finishedAt = new Date();
+        await PosSyncRun.create({
+            site, startedAt, finishedAt, durationMs: finishedAt - startedAt,
+            status: "failed", done: false,
+            message: error.response?.data?.message || error.message
+        }).catch(() => {});
         return handlePOSError(res, error);
     }
 };
