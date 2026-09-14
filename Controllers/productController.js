@@ -2,10 +2,28 @@
 import { Product } from "../Model/productModel.js";
 import { Review } from "../Model/ReviewModel.js";
 import { Order } from "../Model/OrderModel.js";
+import { PosSettings } from "../Model/posSettingsModel.js";
 import getdatauri from "../Middleware/datauriparser.js";
 import cloudinary from "../services/cloudinary.js";
 
 const SITES = ["doubleapple", "triplebuzz", "both"];
+
+// The POS kill switch (portal → POS integration → Temporarily disable) hides
+// that site's already-synced products from every storefront and the portal's
+// own product list, not just future syncs. Manually-added products (no
+// posId) are never affected — this only ever touches POS-sourced rows.
+async function getSitesWithSyncDisabled() {
+    const disabled = await PosSettings.find({ enabled: false }).select("site").lean();
+    return disabled.map((s) => s.site);
+}
+
+function excludeDisabledPosProducts(filter, disabledSites) {
+    if (disabledSites.length === 0) return filter;
+    return {
+        ...filter,
+        $nor: disabledSites.map((site) => ({ site, posId: { $exists: true } }))
+    };
+}
 
 // Real rating/review-count/units-sold per product, computed in two grouped
 // aggregations (not one query per card) so a grid of dozens of products
@@ -188,11 +206,15 @@ export const getAllProducts = async (req, res) => {
             const matches = site === "doubleapple" ? [site, "both", null] : [site, "both"];
             filter.site = { $in: matches };
         }
+
+        const disabledSites = await getSitesWithSyncDisabled();
+        const finalFilter = excludeDisabledPosProducts(filter, disabledSites);
+
         const skip = (page - 1) * limit;
         const dbStart = performance.now();
         const [products, totalItems] = await Promise.all([
-            Product.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
-            Product.countDocuments(filter)
+            Product.find(finalFilter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+            Product.countDocuments(finalFilter)
         ]);
         const dbTime = performance.now() - dbStart;
 
@@ -331,6 +353,14 @@ export const FindProductById = async (req, res) => {
         const { id } = req.params;
         const product = await Product.findById(id).lean()
         if (!product) return res.status(404).json({ success: false, message: "Product Not Found!" })
+
+        if (product.posId) {
+            const disabledSites = await getSitesWithSyncDisabled();
+            if (disabledSites.includes(product.site)) {
+                return res.status(404).json({ success: false, message: "Product Not Found!" })
+            }
+        }
+
         const [withStats] = await attachSalesAndRatingStats([product]);
         return res.status(200).json({ success: true, message: "Product Fetched Successfully!", product: withEffectiveDiscount({ ...withStats, site: withStats.site ?? "both" }) })
     } catch (error) {
