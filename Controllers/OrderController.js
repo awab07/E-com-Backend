@@ -5,6 +5,8 @@ import { User } from "../Model/userModel.js"
 import { Address } from "../Model/AddressModel.js"
 import { createPaypalOrder, capturePaypalOrder } from "../services/paypal.js"
 import { chargeCreditCard, verifyWebhookSignature } from "../services/authorizeNet.js"
+import { sendOrderConfirmationEmail } from "../Mailer/MailSender.js"
+import { resolveCouponDiscount } from "./couponController.js"
 
 class OrderValidationError extends Error {
     constructor(status, message) {
@@ -23,7 +25,7 @@ async function prepareOrder(req) {
         user = await User.findById(userID).lean();
     }
 
-    const { items, shippingAddress, guestInfo } = req.body;
+    const { items, shippingAddress, guestInfo, couponCode, site } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
         throw new OrderValidationError(400, "Items are required!");
@@ -94,6 +96,23 @@ async function prepareOrder(req) {
         totalItems += item.quantity;
     }
 
+    // Re-validated and re-priced here (never trusted from the client) against
+    // the pre-discount total computed just above, so a coupon can only ever
+    // reduce what a customer is actually charged — the same amount the cart's
+    // /Coupon/validate preview computed, not whatever the client sends.
+    let couponDiscount = 0;
+    let appliedCouponCode = null;
+    if (couponCode) {
+        try {
+            const result = await resolveCouponDiscount(couponCode, totalAmount, site);
+            couponDiscount = result.discount;
+            appliedCouponCode = result.code;
+            totalAmount = Math.round((totalAmount - couponDiscount) * 100) / 100;
+        } catch (err) {
+            throw new OrderValidationError(err.status || 400, err.message);
+        }
+    }
+
     const deliverytime = new Date();
     deliverytime.setDate(deliverytime.getDate() + 4);
 
@@ -105,7 +124,10 @@ async function prepareOrder(req) {
     }));
     await Product.bulkWrite(bulkOps);
 
-    return { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime };
+    return {
+        user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime,
+        couponCode: appliedCouponCode, couponDiscount
+    };
 }
 
 async function saveShippingAddress(user, shippingAddress) {
@@ -127,6 +149,23 @@ async function saveShippingAddress(user, shippingAddress) {
     );
 }
 
+// Resolves who the order confirmation email goes to — works from just the
+// Order document, so it's usable in every success path (OrderCreator has
+// `user`/`guestInfo` already in scope, but confirmPaypalOrder only has the
+// order it looked up by paypalOrderId).
+async function getOrderRecipient(order) {
+    if (order.guestInfo?.email) {
+        return { email: order.guestInfo.email, name: `${order.guestInfo.firstName} ${order.guestInfo.lastName}` };
+    }
+    if (order.user) {
+        const orderUser = await User.findById(order.user).select("firstname lastname email").lean();
+        if (orderUser?.email) {
+            return { email: orderUser.email, name: `${orderUser.firstname} ${orderUser.lastname}` };
+        }
+    }
+    return null;
+}
+
 // Restores stock for an order that never got paid for (failed/expired PayPal capture).
 async function restoreStock(processedItems) {
     const bulkOps = processedItems.map(item => ({
@@ -141,7 +180,7 @@ async function restoreStock(processedItems) {
 export const OrderCreator = async (req, res) => {
     try {
         const { paymentMethod } = req.body;
-        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime } =
+        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime, couponCode, couponDiscount } =
             await prepareOrder(req);
 
         const orderData = {
@@ -153,6 +192,11 @@ export const OrderCreator = async (req, res) => {
             isGuestOrder: !user,
             estimatedDelivery: deliverytime
         };
+
+        if (couponCode) {
+            orderData.couponCode = couponCode;
+            orderData.couponDiscount = couponDiscount;
+        }
 
         if (user) {
             orderData.user = user._id;
@@ -173,6 +217,11 @@ export const OrderCreator = async (req, res) => {
 
         await order.populate("items.product");
 
+        const recipient = await getOrderRecipient(order);
+        if (recipient) {
+            await sendOrderConfirmationEmail({ toEmail: recipient.email, customerName: recipient.name, order });
+        }
+
         return res.status(201).json({
             success: true,
             message: user ? "Order Created Successfully!" : "Guest Order Created Successfully!",
@@ -191,7 +240,7 @@ export const OrderCreator = async (req, res) => {
 // frontend's PayPal buttons have something to approve.
 export const initiatePaypalOrder = async (req, res) => {
     try {
-        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime } =
+        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime, couponCode, couponDiscount } =
             await prepareOrder(req);
 
         const orderData = {
@@ -204,6 +253,11 @@ export const initiatePaypalOrder = async (req, res) => {
             isGuestOrder: !user,
             estimatedDelivery: deliverytime
         };
+
+        if (couponCode) {
+            orderData.couponCode = couponCode;
+            orderData.couponDiscount = couponDiscount;
+        }
 
         if (user) {
             orderData.user = user._id;
@@ -280,6 +334,11 @@ export const confirmPaypalOrder = async (req, res) => {
         await order.save();
         await order.populate("items.product");
 
+        const recipient = await getOrderRecipient(order);
+        if (recipient) {
+            await sendOrderConfirmationEmail({ toEmail: recipient.email, customerName: recipient.name, order });
+        }
+
         return res.status(200).json({ success: true, message: "Payment Captured Successfully!", order });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -296,7 +355,7 @@ export const chargeAuthorizeNetOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing card payment token (opaqueData)." });
         }
 
-        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime } =
+        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime, couponCode, couponDiscount } =
             await prepareOrder(req);
 
         const orderData = {
@@ -309,6 +368,11 @@ export const chargeAuthorizeNetOrder = async (req, res) => {
             isGuestOrder: !user,
             estimatedDelivery: deliverytime
         };
+
+        if (couponCode) {
+            orderData.couponCode = couponCode;
+            orderData.couponDiscount = couponDiscount;
+        }
 
         if (user) {
             orderData.user = user._id;
@@ -364,6 +428,11 @@ export const chargeAuthorizeNetOrder = async (req, res) => {
         }
 
         await order.populate("items.product");
+
+        const recipient = await getOrderRecipient(order);
+        if (recipient) {
+            await sendOrderConfirmationEmail({ toEmail: recipient.email, customerName: recipient.name, order });
+        }
 
         return res.status(201).json({ success: true, message: "Payment Charged Successfully!", order });
     } catch (error) {

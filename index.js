@@ -17,6 +17,7 @@ import newsletterRoutes from "./Routes/newsletterRoutes.js";
 import { swaggerSpec } from "./services/swagger.js";
 import cookieParser from "cookie-parser";
 import posRouter from "./Routes/posRoutes.js";
+import couponRoutes from "./Routes/couponRoutes.js";
 import responseTime from "response-time";
 
 dotenv.config();
@@ -130,6 +131,7 @@ app.use("/Review", reviewRoutes)
 app.use("/Blog", blogRoutes)
 app.use("/Newsletter", newsletterRoutes)
 app.use("/POS",     posRouter)
+app.use("/Coupon",  couponRoutes)
 
 async function startServer() {
     await connectDB();
