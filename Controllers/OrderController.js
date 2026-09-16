@@ -6,6 +6,7 @@ import { Address } from "../Model/AddressModel.js"
 import { createPaypalOrder, capturePaypalOrder } from "../services/paypal.js"
 import { chargeCreditCard, verifyWebhookSignature } from "../services/authorizeNet.js"
 import { sendOrderConfirmationEmail } from "../Mailer/MailSender.js"
+import { resolveCouponDiscount } from "./couponController.js"
 
 class OrderValidationError extends Error {
     constructor(status, message) {
@@ -24,7 +25,7 @@ async function prepareOrder(req) {
         user = await User.findById(userID).lean();
     }
 
-    const { items, shippingAddress, guestInfo } = req.body;
+    const { items, shippingAddress, guestInfo, couponCode, site } = req.body;
 
     if (!Array.isArray(items) || items.length === 0) {
         throw new OrderValidationError(400, "Items are required!");
@@ -95,6 +96,23 @@ async function prepareOrder(req) {
         totalItems += item.quantity;
     }
 
+    // Re-validated and re-priced here (never trusted from the client) against
+    // the pre-discount total computed just above, so a coupon can only ever
+    // reduce what a customer is actually charged — the same amount the cart's
+    // /Coupon/validate preview computed, not whatever the client sends.
+    let couponDiscount = 0;
+    let appliedCouponCode = null;
+    if (couponCode) {
+        try {
+            const result = await resolveCouponDiscount(couponCode, totalAmount, site);
+            couponDiscount = result.discount;
+            appliedCouponCode = result.code;
+            totalAmount = Math.round((totalAmount - couponDiscount) * 100) / 100;
+        } catch (err) {
+            throw new OrderValidationError(err.status || 400, err.message);
+        }
+    }
+
     const deliverytime = new Date();
     deliverytime.setDate(deliverytime.getDate() + 4);
 
@@ -106,7 +124,10 @@ async function prepareOrder(req) {
     }));
     await Product.bulkWrite(bulkOps);
 
-    return { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime };
+    return {
+        user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime,
+        couponCode: appliedCouponCode, couponDiscount
+    };
 }
 
 async function saveShippingAddress(user, shippingAddress) {
@@ -159,7 +180,7 @@ async function restoreStock(processedItems) {
 export const OrderCreator = async (req, res) => {
     try {
         const { paymentMethod } = req.body;
-        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime } =
+        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime, couponCode, couponDiscount } =
             await prepareOrder(req);
 
         const orderData = {
@@ -171,6 +192,11 @@ export const OrderCreator = async (req, res) => {
             isGuestOrder: !user,
             estimatedDelivery: deliverytime
         };
+
+        if (couponCode) {
+            orderData.couponCode = couponCode;
+            orderData.couponDiscount = couponDiscount;
+        }
 
         if (user) {
             orderData.user = user._id;
@@ -214,7 +240,7 @@ export const OrderCreator = async (req, res) => {
 // frontend's PayPal buttons have something to approve.
 export const initiatePaypalOrder = async (req, res) => {
     try {
-        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime } =
+        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime, couponCode, couponDiscount } =
             await prepareOrder(req);
 
         const orderData = {
@@ -227,6 +253,11 @@ export const initiatePaypalOrder = async (req, res) => {
             isGuestOrder: !user,
             estimatedDelivery: deliverytime
         };
+
+        if (couponCode) {
+            orderData.couponCode = couponCode;
+            orderData.couponDiscount = couponDiscount;
+        }
 
         if (user) {
             orderData.user = user._id;
@@ -324,7 +355,7 @@ export const chargeAuthorizeNetOrder = async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing card payment token (opaqueData)." });
         }
 
-        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime } =
+        const { user, processedItems, totalAmount, totalItems, shippingAddress, guestInfo, deliverytime, couponCode, couponDiscount } =
             await prepareOrder(req);
 
         const orderData = {
@@ -337,6 +368,11 @@ export const chargeAuthorizeNetOrder = async (req, res) => {
             isGuestOrder: !user,
             estimatedDelivery: deliverytime
         };
+
+        if (couponCode) {
+            orderData.couponCode = couponCode;
+            orderData.couponDiscount = couponDiscount;
+        }
 
         if (user) {
             orderData.user = user._id;

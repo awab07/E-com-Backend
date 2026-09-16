@@ -149,6 +149,14 @@ const orderSchema = new mongoose.Schema(
             type: Date,
             required: true
         },
+        couponCode: {
+            type: String,
+            default: null
+        },
+        couponDiscount: {
+            type: Number,
+            default: 0
+        },
         isArchived: {
             type: Boolean,
             default: false
