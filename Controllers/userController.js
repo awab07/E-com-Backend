@@ -103,9 +103,11 @@ export const Loginuser = async (req, res) => {
         // sameSite must be "none" (with secure: true) for the cookie to be sent at all
         // on cross-site requests — the frontend and backend are on different domains.
         // "strict"/"lax" only work when frontend and backend share the same site.
-        // NODE_ENV isn't reliably "production" on Vercel's serverless runtime, so also
-        // check VERCEL, which Vercel always sets at runtime for every deployment.
-        const isProd = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
+        // Derived from the actual request rather than NODE_ENV/VERCEL env vars —
+        // those are set automatically on Vercel but need manual setup on every
+        // other host (e.g. Hostinger), and forgetting that silently breaks login
+        // persistence there. Only real local dev ever hits this over "localhost".
+        const isProd = req.hostname !== "localhost";
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
             secure: isProd,
@@ -183,7 +185,7 @@ export const logout = async (req, res) => {
                 { refreshToken: null, refreshTokenExpiry: null }
             );
         }
-        const isProd = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
+        const isProd = req.hostname !== "localhost";
         res.clearCookie("refreshToken", {
             httpOnly: true,
             secure: isProd,
