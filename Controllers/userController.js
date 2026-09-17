@@ -119,6 +119,10 @@ export const Loginuser = async (req, res) => {
             success: true,
             message: "User Logged in Successfully!",
             accessToken,
+            // Also handed back in the body (not just the cookie) so cross-site
+            // frontends — where the cookie is a third-party cookie browsers
+            // silently drop (see client.js) — can persist it themselves.
+            refreshToken,
             user: {
                 _id: user._id,
                 firstname: user.firstname,
@@ -141,7 +145,10 @@ export const Loginuser = async (req, res) => {
 
 export const refreshToken = async (req, res) => {
     try {
-        const token = req.cookies?.refreshToken;
+        // Cookie first (works when frontend and backend are same-site, e.g.
+        // Triple Buzz), falling back to the body (cross-site frontends that
+        // store it in localStorage themselves since the cookie gets blocked).
+        const token = req.cookies?.refreshToken || req.body?.refreshToken;
         if (!token) return res.status(401).json({ success: false, message: "No refresh token provided." });
 
         let decoded;
@@ -178,7 +185,7 @@ export const refreshToken = async (req, res) => {
 
 export const logout = async (req, res) => {
     try {
-        const token = req.cookies?.refreshToken;
+        const token = req.cookies?.refreshToken || req.body?.refreshToken;
         if (token) {
             await User.findOneAndUpdate(
                 { refreshToken: token },
