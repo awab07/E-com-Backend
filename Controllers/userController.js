@@ -103,11 +103,9 @@ export const Loginuser = async (req, res) => {
         // sameSite must be "none" (with secure: true) for the cookie to be sent at all
         // on cross-site requests — the frontend and backend are on different domains.
         // "strict"/"lax" only work when frontend and backend share the same site.
-        // Derived from the actual request rather than NODE_ENV/VERCEL env vars —
-        // those are set automatically on Vercel but need manual setup on every
-        // other host (e.g. Hostinger), and forgetting that silently breaks login
-        // persistence there. Only real local dev ever hits this over "localhost".
-        const isProd = req.hostname !== "localhost";
+        // NODE_ENV isn't reliably "production" on Vercel's serverless runtime, so also
+        // check VERCEL, which Vercel always sets at runtime for every deployment.
+        const isProd = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
             secure: isProd,
@@ -119,10 +117,6 @@ export const Loginuser = async (req, res) => {
             success: true,
             message: "User Logged in Successfully!",
             accessToken,
-            // Also handed back in the body (not just the cookie) so cross-site
-            // frontends — where the cookie is a third-party cookie browsers
-            // silently drop (see client.js) — can persist it themselves.
-            refreshToken,
             user: {
                 _id: user._id,
                 firstname: user.firstname,
@@ -145,10 +139,7 @@ export const Loginuser = async (req, res) => {
 
 export const refreshToken = async (req, res) => {
     try {
-        // Cookie first (works when frontend and backend are same-site, e.g.
-        // Triple Buzz), falling back to the body (cross-site frontends that
-        // store it in localStorage themselves since the cookie gets blocked).
-        const token = req.cookies?.refreshToken || req.body?.refreshToken;
+        const token = req.cookies?.refreshToken;
         if (!token) return res.status(401).json({ success: false, message: "No refresh token provided." });
 
         let decoded;
@@ -185,14 +176,14 @@ export const refreshToken = async (req, res) => {
 
 export const logout = async (req, res) => {
     try {
-        const token = req.cookies?.refreshToken || req.body?.refreshToken;
+        const token = req.cookies?.refreshToken;
         if (token) {
             await User.findOneAndUpdate(
                 { refreshToken: token },
                 { refreshToken: null, refreshTokenExpiry: null }
             );
         }
-        const isProd = req.hostname !== "localhost";
+        const isProd = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
         res.clearCookie("refreshToken", {
             httpOnly: true,
             secure: isProd,
