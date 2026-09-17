@@ -37,6 +37,10 @@ app.use(cors({
         "http://localhost:5175",
         "https://double-apple.vercel.app",
         "https://triple-buzz.vercel.app",
+        "https://doubleapplesmokeshop.com",
+        "https://www.doubleapplesmokeshop.com",
+        "https://triplebuzzsmokeshop.com",
+        "https://www.triplebuzzsmokeshop.com",
         process.env.FRONTEND_URL
     ].filter(Boolean),
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
