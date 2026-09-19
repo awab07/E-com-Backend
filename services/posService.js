@@ -91,7 +91,8 @@ export const getPOSInventoryLevels = async (site, params = {}) => {
         ...(params.location_ids && { location_ids: params.location_ids }),
         ...(params.product_ids  && { product_ids: params.product_ids })
     });
-    const data = response.data;
+    // A page past the end can come back as null rather than [].
+    const data = response.data ?? [];
     return {
         data,
         nextOffset: data.length === size ? offset + size : null

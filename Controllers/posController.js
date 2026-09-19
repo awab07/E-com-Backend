@@ -9,6 +9,7 @@ import {
 import { Product } from "../Model/productModel.js";
 import { PosSettings } from "../Model/posSettingsModel.js";
 import { PosSyncRun } from "../Model/posSyncRunModel.js";
+import { applyReservations, getOpenOrderUnits } from "../services/stockReservation.js";
 
 const POS_SITES = ["triplebuzz", "doubleapple"];
 
@@ -123,12 +124,20 @@ export const getPOSStatus = async (req, res) => {
         const domain = process.env[account.domain];
         const connected = Boolean(domain && process.env[account.token]);
 
-        const [enabled, totalProducts, latestSynced, latestRun] = await Promise.all([
+        const [enabled, totalProducts, latestSynced, latestRun, settings] = await Promise.all([
             isSiteEnabled(site),
             Product.countDocuments({ site, posId: { $exists: true } }),
             Product.findOne({ site, posId: { $exists: true } }).sort({ posSyncedAt: -1 }).select("posSyncedAt").lean(),
-            PosSyncRun.findOne({ site }).sort({ startedAt: -1 }).lean()
+            PosSyncRun.findOne({ site }).sort({ startedAt: -1 }).lean(),
+            PosSettings.findOne({ site }).lean()
         ]);
+
+        // The background auto-sync only writes products that actually changed,
+        // so Product.posSyncedAt alone would look stale even while it runs —
+        // count its last completed cycle as a sync too.
+        const lastSyncAt = [latestSynced?.posSyncedAt, settings?.lastAutoSyncAt]
+            .filter(Boolean)
+            .sort((a, b) => new Date(b) - new Date(a))[0] ?? null;
 
         return res.status(200).json({
             success: true,
@@ -138,8 +147,14 @@ export const getPOSStatus = async (req, res) => {
                 enabled,
                 accountName: domain ? `${domain}.retail.lightspeed.app` : "Not configured",
                 totalProducts,
-                lastSyncAt: latestSynced?.posSyncedAt ?? null,
+                lastSyncAt,
                 lastRun: latestRun ?? null,
+                autoSync: {
+                    lastAt: settings?.lastAutoSyncAt ?? null,
+                    lastSummary: settings?.lastAutoSyncSummary ?? null,
+                    lastError: settings?.lastAutoSyncError ?? null,
+                    lastErrorAt: settings?.lastAutoSyncErrorAt ?? null
+                },
                 direction: "inbound",
                 scopes: ["read:products", "read:product_categories", "read:inventory"]
             }
@@ -218,7 +233,7 @@ export const getPOSSyncRuns = async (req, res) => {
 
 // Maps a Lightspeed product into this backend's Product shape, tagged for
 // whichever storefront's own POS account it was pulled from.
-const mapLightspeedProduct = (posProduct, stockMap, site) => {
+export const mapLightspeedProduct = (posProduct, stockMap, site) => {
     const category = posProduct.product_category?.name?.trim();
     const images = (posProduct.images || [])
         .filter((img) => img?.url)
@@ -234,6 +249,7 @@ const mapLightspeedProduct = (posProduct, stockMap, site) => {
         brand: posProduct.brand?.name || undefined,
         image: images,
         site,
+        posActive: true,
         posSyncedAt: new Date()
     };
 };
@@ -274,6 +290,9 @@ export const syncPOSProducts = async (req, res) => {
 
     try {
         const inventoryMap = await fetchPOSInventoryMap(site);
+        // Site stock is POS stock minus what open web orders already claimed —
+        // otherwise this sync would put stock back that a website order took.
+        const reservedById = await getOpenOrderUnits();
 
         let created = 0;
         let updated = 0;
@@ -291,6 +310,7 @@ export const syncPOSProducts = async (req, res) => {
                 if (sellable.length === 0) return;
 
                 const docs = sellable.map((p) => mapLightspeedProduct(p, inventoryMap, site));
+                await applyReservations(docs, reservedById);
                 docs.forEach((d) => categoriesSeen.add(d.category));
 
                 const result = await Product.bulkWrite(

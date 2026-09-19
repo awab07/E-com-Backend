@@ -81,7 +81,12 @@ const productSchema = new mongoose.Schema({
         sparse: true,
         index: true
     },
-    posSyncedAt: Date
+    posSyncedAt: Date,
+
+    // false once the item is deactivated/deleted in the POS. Such products
+    // keep their record (past orders reference it) but are hidden from
+    // listings and have stock 0. Unset on products that never came from a POS.
+    posActive: Boolean
 
 }, { timestamps: true })
 

@@ -18,9 +18,12 @@ async function getSitesWithSyncDisabled() {
 }
 
 function excludeDisabledPosProducts(filter, disabledSites) {
-    if (disabledSites.length === 0) return filter;
+    // Products deactivated/deleted in the POS (posActive === false) never list;
+    // manual products and ones synced before this flag existed have it unset.
+    const base = { ...filter, posActive: { $ne: false } };
+    if (disabledSites.length === 0) return base;
     return {
-        ...filter,
+        ...base,
         $nor: disabledSites.map((site) => ({ site, posId: { $exists: true } }))
     };
 }

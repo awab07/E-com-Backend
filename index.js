@@ -19,6 +19,7 @@ import cookieParser from "cookie-parser";
 import posRouter from "./Routes/posRoutes.js";
 import couponRoutes from "./Routes/couponRoutes.js";
 import responseTime from "response-time";
+import { startPosAutoSync } from "./services/posAutoSync.js";
 
 dotenv.config();
 dns.setDefaultResultOrder("ipv4first");
@@ -139,6 +140,8 @@ app.use("/Coupon",  couponRoutes)
 
 async function startServer() {
     await connectDB();
+    // Opt-in (POS_AUTO_SYNC=on), never on serverless — see services/posAutoSync.js.
+    startPosAutoSync();
     if (process.env.NODE_ENV !== "production") {
         app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
     }
