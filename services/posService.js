@@ -114,18 +114,46 @@ export const fetchAllPOSCategories = async (site) => {
 
 // Map<lightspeed_product_id, totalStock> — summed across outlets in case
 // this account ever has more than the one location it has today.
-export const fetchPOSInventoryMap = async (site) => {
-    const map = new Map();
-    let offset = 0;
-    while (true) {
-        const { data, nextOffset } = await getPOSInventoryLevels(site, { offset, size: 250 });
-        for (const level of data) {
-            map.set(level.product_id, (map.get(level.product_id) || 0) + (level.current_inventory_level || 0));
+//
+// Pages are offset-based, so they're fetched in parallel waves (a sequential
+// walk of ~13 slow pages took ~34s; four at a time takes ~3s). Any failed page
+// fails the whole read — a partial map would look like "stock 0" for
+// everything on the missing pages. Lightspeed rate-limits with 429, which is
+// retried a few times first.
+const INVENTORY_PAGE_SIZE = 250;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function withRateLimitRetry(fn) {
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            if (err.response?.status !== 429 || attempt >= 3) throw err;
+            const retryAfter = Number(err.response.headers?.["retry-after"]);
+            await sleep((Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 2 ** attempt * 2) * 1000);
         }
-        if (nextOffset === null) break;
-        offset = nextOffset;
     }
-    return map;
+}
+
+export const fetchPOSInventoryMap = async (site, { concurrency = 4 } = {}) => {
+    const map = new Map();
+    for (let wave = 0; ; wave++) {
+        const pages = await Promise.all(
+            Array.from({ length: concurrency }, (_, i) =>
+                withRateLimitRetry(() =>
+                    getPOSInventoryLevels(site, { offset: (wave * concurrency + i) * INVENTORY_PAGE_SIZE, size: INVENTORY_PAGE_SIZE })
+                )
+            )
+        );
+        let reachedEnd = false;
+        for (const { data } of pages) {
+            for (const level of data) {
+                map.set(level.product_id, (map.get(level.product_id) || 0) + (level.current_inventory_level || 0));
+            }
+            if (data.length < INVENTORY_PAGE_SIZE) reachedEnd = true;
+        }
+        if (reachedEnd) return map;
+    }
 };
 
 // Streams product pages to onPage() so a caller can upsert as it goes rather

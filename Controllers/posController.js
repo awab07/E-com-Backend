@@ -262,7 +262,14 @@ export const mapLightspeedProduct = (posProduct, stockMap, site) => {
 // start) is always safe — it never creates duplicates. Each site's posId
 // values come from that site's own Lightspeed account, so a triplebuzz sync
 // and a doubleapple sync can never collide with or overwrite each other.
-const SYNC_TIME_BUDGET_MS = 45000;
+//
+// The budget is checked after each product page, so a request can overrun it
+// by one slow page (Lightspeed answers in 3-16s). It must stay comfortably
+// under the host's request time limit — raise POS_SYNC_TIME_BUDGET_SECONDS
+// only if the deployment allows longer requests.
+const SYNC_TIME_BUDGET_MS = (Number(process.env.POS_SYNC_TIME_BUDGET_SECONDS) > 0
+    ? Number(process.env.POS_SYNC_TIME_BUDGET_SECONDS)
+    : 60) * 1000;
 
 export const syncPOSProducts = async (req, res) => {
     const site = resolveSite(req, res);

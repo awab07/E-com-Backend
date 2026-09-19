@@ -1,4 +1,4 @@
-import { getPOSInventoryLevels, streamAllPOSProducts } from "./posService.js";
+import { fetchPOSInventoryMap, streamAllPOSProducts } from "./posService.js";
 import { mapLightspeedProduct } from "../Controllers/posController.js";
 import { availableStock, getOpenOrderUnits } from "./stockReservation.js";
 import { Product } from "../Model/productModel.js";
@@ -43,7 +43,6 @@ const SITE_ENV = {
     doubleapple: { domain: "LIGHTSPEED_DOMAIN_DOUBLEAPPLE", token: "LIGHTSPEED_ACCESS_TOKEN_DOUBLEAPPLE" }
 };
 
-const INVENTORY_PAGE_SIZE = 250;
 // The very first cycle and each full re-check walk the whole catalogue (~22
 // slow pages), so the lease has to outlast that; other cycles are short.
 const LEASE_MS = 10 * 60 * 1000;
@@ -75,42 +74,6 @@ function config() {
                 process.env[SITE_ENV[site].token]
         )
     };
-}
-
-// Lightspeed rate-limits with 429 (+ Retry-After). Retry a few times before
-// giving up on the cycle.
-async function withRetry(fn) {
-    for (let attempt = 0; ; attempt++) {
-        try {
-            return await fn();
-        } catch (err) {
-            if (err.response?.status !== 429 || attempt >= 3) throw err;
-            const retryAfter = Number(err.response.headers?.["retry-after"]);
-            await sleep((Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 2 ** attempt * 2) * 1000);
-        }
-    }
-}
-
-// Whole-store stock as Map<posProductId, units>, summed across outlets.
-// Pages are offset-based, so they can be fetched in parallel waves. Any failed
-// page fails the whole read — a partial map would look like "stock 0" for
-// everything on the missing pages.
-async function fetchInventoryMap(site, concurrency) {
-    const map = new Map();
-    for (let wave = 0; ; wave++) {
-        const offsets = Array.from({ length: concurrency }, (_, i) => (wave * concurrency + i) * INVENTORY_PAGE_SIZE);
-        const pages = await Promise.all(
-            offsets.map((offset) => withRetry(() => getPOSInventoryLevels(site, { offset, size: INVENTORY_PAGE_SIZE })))
-        );
-        let reachedEnd = false;
-        for (const { data } of pages) {
-            for (const level of data) {
-                map.set(level.product_id, (map.get(level.product_id) || 0) + (level.current_inventory_level || 0));
-            }
-            if (data.length < INVENTORY_PAGE_SIZE) reachedEnd = true;
-        }
-        if (reachedEnd) return map;
-    }
 }
 
 async function fetchProductChanges(site, after) {
@@ -146,7 +109,7 @@ export async function runAutoSyncCycle(site, { dryRun = false, concurrency = 4, 
 
     // Stock and product changes are independent reads — do them together.
     const [inventoryMap, changes] = await Promise.all([
-        fetchInventoryMap(site, concurrency),
+        fetchPOSInventoryMap(site, { concurrency }),
         fetchProductChanges(site, after)
     ]);
 
