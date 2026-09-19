@@ -157,6 +157,27 @@ const orderSchema = new mongoose.Schema(
             type: Number,
             default: 0
         },
+        // Tracks this order's stock movement into the POS (services/posStockPush.js):
+        // the units it took out of Lightspeed when placed/paid, so a cancellation
+        // can put exactly those back, and so it is never pushed twice.
+        posStockSync: {
+            synced: { type: Boolean, default: false },
+            syncedAt: Date,
+            reversedAt: Date,
+            lines: [
+                {
+                    _id: false,
+                    site: String,
+                    product: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
+                    posProductId: String,
+                    outletId: String,
+                    quantity: Number,
+                    adjustmentId: String
+                }
+            ],
+            error: String,
+            errorAt: Date
+        },
         isArchived: {
             type: Boolean,
             default: false

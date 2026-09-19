@@ -42,6 +42,9 @@ export async function getOpenOrderUnits() {
         {
             $match: {
                 isArchived: { $ne: true },
+                // Orders already taken out of the POS by services/posStockPush.js
+                // are in its count, so holding them back again would count twice.
+                "posStockSync.synced": { $ne: true },
                 status: { $in: reserveStatuses() },
                 paymentStatus: { $ne: "failed" },
                 createdAt: { $gte: maxAge },

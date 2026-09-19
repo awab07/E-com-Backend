@@ -99,6 +99,43 @@ export const getPOSInventoryLevels = async (site, params = {}) => {
     };
 };
 
+// POST /stock_adjustments — writes stock changes into the POS (needs a token
+// with the inventory:write scope). Each entry is
+// { product_id, outlet_id, quantity, reason[, custom_inventory_adjustment_reason_id] }
+// with quantity a signed numeric string (negative removes stock). Returns the
+// created adjustments in request order. Deliberately a short timeout: it runs
+// inside a customer's checkout request.
+export const createPOSStockAdjustments = async (site, adjustments) => {
+    const response = await getPosClient(site).post(
+        "/stock_adjustments",
+        { stock_adjustments: adjustments },
+        { timeout: 15000 }
+    );
+    return response.data?.data ?? [];
+};
+
+// The outlet (Lightspeed calls it a location on inventory levels) that holds a
+// product's stock. Each account has a single outlet today; if that ever
+// changes, the one with the most stock wins. LIGHTSPEED_OUTLET_ID[_DOUBLEAPPLE]
+// pins it explicitly and skips the lookup.
+const outletCache = new Map();
+export const getPOSOutletIdForProduct = async (site, productId) => {
+    const pinned = site === "doubleapple"
+        ? process.env.LIGHTSPEED_OUTLET_ID_DOUBLEAPPLE
+        : process.env.LIGHTSPEED_OUTLET_ID;
+    if (pinned) return pinned;
+
+    const key = `${site}:${productId}`;
+    if (outletCache.has(key)) return outletCache.get(key);
+
+    const { data } = await getPOSInventoryLevels(site, { size: 50, product_ids: [productId] });
+    const levels = data.filter((l) => l.location_id);
+    if (levels.length === 0) throw new Error(`No POS outlet found for product ${productId}`);
+    levels.sort((a, b) => (b.current_inventory_level || 0) - (a.current_inventory_level || 0));
+    outletCache.set(key, levels[0].location_id);
+    return levels[0].location_id;
+};
+
 // ---- Bulk helpers built on the pagers above, used by the sync job ----
 
 export const fetchAllPOSCategories = async (site) => {

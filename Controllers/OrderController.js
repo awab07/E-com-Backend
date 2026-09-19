@@ -7,6 +7,7 @@ import { createPaypalOrder, capturePaypalOrder } from "../services/paypal.js"
 import { chargeCreditCard, verifyWebhookSignature } from "../services/authorizeNet.js"
 import { sendOrderConfirmationEmail } from "../Mailer/MailSender.js"
 import { resolveCouponDiscount } from "./couponController.js"
+import { pushOrderStockToPOS, reverseOrderStockInPOS } from "../services/posStockPush.js"
 
 class OrderValidationError extends Error {
     constructor(status, message) {
@@ -215,6 +216,10 @@ export const OrderCreator = async (req, res) => {
             await saveShippingAddress(user, shippingAddress);
         }
 
+        // Cash-on-delivery has no payment step, so the order is committed the
+        // moment it is placed: take its units out of the POS now.
+        await pushOrderStockToPOS(order);
+
         await order.populate("items.product");
 
         const recipient = await getOrderRecipient(order);
@@ -332,6 +337,7 @@ export const confirmPaypalOrder = async (req, res) => {
         order.status = "confirmed";
         order.paymentDetails.paypalCaptureId = captureResult.id;
         await order.save();
+        await pushOrderStockToPOS(order);
         await order.populate("items.product");
 
         const recipient = await getOrderRecipient(order);
@@ -422,6 +428,7 @@ export const chargeAuthorizeNetOrder = async (req, res) => {
         order.status = "confirmed";
         order.paymentDetails.authorizeNetTransactionId = txn.transId;
         await order.save();
+        await pushOrderStockToPOS(order);
 
         if (user) {
             await saveShippingAddress(user, shippingAddress);
@@ -599,6 +606,7 @@ export const UpdateOrderStatus = async (req, res) => {
                 }
             }));
             if (bulkOps.length > 0) await Product.bulkWrite(bulkOps);
+            await reverseOrderStockInPOS(order);
         }
 
         if (status === "delivered" && order.status !== "delivered") {
@@ -643,6 +651,7 @@ export const ordercancelforuser = async (req, res) => {
             }
         }));
         if (bulkOps.length > 0) await Product.bulkWrite(bulkOps);
+        await reverseOrderStockInPOS(order);
 
         order.status = "cancelled";
         await order.save();
