@@ -1,5 +1,5 @@
 import express from "express"
-import { FindProductById, getAllProducts, imageDeletor, ProductCreator, ProductDeleter, ProductUpdater } from "../Controllers/productController.js"
+import { FindProductById, getAllProducts, getCategorySummary, imageDeletor, ProductCreator, ProductDeleter, ProductUpdater } from "../Controllers/productController.js"
 import { isAdmin, protection } from "../Middleware/Middleware.js"
 import { multiStorage } from "../Middleware/multer.js"
 import { discountController } from "../Controllers/Discount-Controller.js"
@@ -257,6 +257,25 @@ productRoutes.post('/createProduct', multiStorage, protection, isAdmin, ProductC
  *                   example: Internal Server Error
  */
 productRoutes.get("/allproducts", getAllProducts)
+
+/**
+ * @swagger
+ * /Product/categories:
+ *   get:
+ *     tags:
+ *       - Products
+ *     summary: Category list with product counts and a representative photo
+ *     parameters:
+ *       - in: query
+ *         name: site
+ *         schema:
+ *           type: string
+ *           enum: [doubleapple, triplebuzz]
+ *     responses:
+ *       200:
+ *         description: Categories fetched successfully
+ */
+productRoutes.get("/categories", getCategorySummary)
 
 /**
  * @swagger

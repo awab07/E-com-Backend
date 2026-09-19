@@ -529,7 +529,10 @@ export const getOrders = async (req, res) => {
 export const getOrderById = async (req, res) => {
     try {
         const { id } = req.params;
-        const order = await Order.findById(id).populate("items.product").lean();
+        const order = await Order.findById(id)
+            .populate("items.product")
+            .populate("user", "firstname lastname email phno")
+            .lean();
         if (!order) return res.status(404).json({ success: false, message: "Order Not Found!" });
         return res.status(200).json({ success: true, message: "Order Fetched Successfully!", order });
     } catch (error) {

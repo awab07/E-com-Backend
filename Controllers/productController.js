@@ -212,8 +212,25 @@ export const getAllProducts = async (req, res) => {
 
         const skip = (page - 1) * limit;
         const dbStart = performance.now();
+        // ?imagesFirst=true lists products that have a photo before the ones
+        // that don't (newest first within each group) — POS-synced items often
+        // have no photo yet, and the plain newest-first order buries the
+        // presentable ones behind them. Needs a computed sort key, so it goes
+        // through an aggregation instead of a plain find().
+        const imagesFirst = req.query.imagesFirst === "true";
+        const listQuery = imagesFirst
+            ? Product.aggregate([
+                { $match: finalFilter },
+                { $addFields: { _hasImage: { $gt: [{ $size: { $ifNull: ["$image", []] } }, 0] } } },
+                { $sort: { _hasImage: -1, createdAt: -1, _id: -1 } },
+                { $skip: skip },
+                { $limit: limit },
+                { $project: { _hasImage: 0 } }
+            ]).allowDiskUse(true)
+            : Product.find(finalFilter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean();
+
         const [products, totalItems] = await Promise.all([
-            Product.find(finalFilter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+            listQuery,
             Product.countDocuments(finalFilter)
         ]);
         const dbTime = performance.now() - dbStart;
@@ -235,6 +252,54 @@ export const getAllProducts = async (req, res) => {
         return res.status(500).json({ message: error.message })
     }
 }
+
+// Per-category product count + one representative photo, computed over the
+// whole catalogue (respecting the same site filter and POS kill switch as the
+// product listing). Storefronts use this for their "Shop by category" grid
+// instead of deriving it from whichever page of products happens to be
+// loaded — which gave wrong counts and, for categories whose newest items
+// have no photo yet, no image at all.
+export const getCategorySummary = async (req, res) => {
+    try {
+        const site = req.query.site || null;
+        const filter = {};
+        if (SITES.includes(site) && site !== "both") {
+            const matches = site === "doubleapple" ? [site, "both", null] : [site, "both"];
+            filter.site = { $in: matches };
+        }
+
+        const disabledSites = await getSitesWithSyncDisabled();
+        const finalFilter = excludeDisabledPosProducts(filter, disabledSites);
+
+        const rows = await Product.aggregate([
+            { $match: finalFilter },
+            {
+                $addFields: {
+                    firstImage: { $arrayElemAt: [{ $ifNull: ["$image.url", []] }, 0] }
+                }
+            },
+            // Newest product that actually has a photo represents its category.
+            { $sort: { firstImage: -1, createdAt: -1, _id: -1 } },
+            {
+                $group: {
+                    _id: "$category",
+                    count: { $sum: 1 },
+                    image: { $first: "$firstImage" }
+                }
+            },
+            { $sort: { count: -1, _id: 1 } }
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            categories: rows
+                .filter((r) => r._id)
+                .map((r) => ({ name: r._id, count: r.count, image: r.image || null }))
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
 
 export const ProductUpdater = async (req, res) => {
     try {
